@@ -332,3 +332,60 @@ def test_ponds_leave_no_paddle_lines_or_portages_but_do_not_change_the_input():
     walking = build_network([NetworkSource("path", gpd.GeoDataFrame(geometry=[], crs=CRS))], metric_crs=CRS)
     assert all(source.gdf.empty for source in water.portages(paddle, walking))
     assert surfaces.equals(before)
+
+
+def test_launches_split_a_passing_path_and_keep_dead_ends_first():
+    from trails.network.launches import launches
+    from trails.routing.sources import LAUNCH
+
+    surface = gpd.GeoDataFrame(geometry=[box(0, 0, 1000, 200)], crs=CRS)
+    paddle = water.sources(surface, metric_crs=CRS)
+    paths = NetworkSource(
+        "roads",
+        gpd.GeoDataFrame(geometry=[LineString([(100, -100), (100, -20)]), LineString([(200, -100), (200, -10), (800, -10), (800, -100)])], crs=CRS),
+    )
+    walking = build_network([paths], bridge_m=0, metric_crs=CRS)
+    source = launches(paddle, walking, water.Access(surface))
+    assert source.kind == LAUNCH and source.cost_factor == 1
+    assert source.gdf["origin"].eq("dead end").any()
+    assert source.gdf["origin"].eq("passing").any()
+    assert len(source.gdf) > len(walking.nodes)
+    assert (source.gdf.length <= 30).all()
+    assert source.gdf.intersection(surface.geometry.iloc[0]).length.max() == 0
+    graph = build_network([paths, *paddle, source], bridge_m=0, metric_crs=CRS)
+    launch_edges = graph.edges[graph.edges["kind"].eq(LAUNCH)]
+    assert len(launch_edges) == len(source.gdf)
+    assert not graph.chains["kind"].eq(LAUNCH).any()
+    assert launch_edges["chain_id"].isna().all()
+    for edge in launch_edges.itertuples():
+        incident = graph.edges[(graph.edges["from_node"].eq(edge.from_node) | graph.edges["to_node"].eq(edge.from_node))]
+        assert incident["source"].eq("roads").any()
+
+
+def test_launches_do_not_cross_water_or_a_dam_disc():
+    from trails.network.launches import launches
+
+    surface = gpd.GeoDataFrame(geometry=[box(0, 0, 1000, 200), box(190, -15, 210, -5)], crs=CRS)
+    paddle = water.sources(surface.iloc[:1], metric_crs=CRS)
+    paths = NetworkSource("roads", gpd.GeoDataFrame(geometry=[LineString([(200, -100), (200, -20)]), LineString([(700, -100), (700, -20)])], crs=CRS))
+    walking = build_network([paths], bridge_m=0, metric_crs=CRS)
+    dams = gpd.GeoDataFrame(geometry=[Point(700, 0)], crs=CRS)
+    source = launches(paddle, walking, water.Access(surface, dams))
+    assert source.gdf.empty
+
+
+def test_projected_launch_ends_share_path_and_shore_nodes_without_inferred_bridges():
+    from trails.routing.noding import NODE_TOLERANCE_M
+    from trails.routing.sources import LAUNCH, PADDLE, PATH
+
+    gap = NODE_TOLERANCE_M / 10
+    sources = [
+        NetworkSource("road", gpd.GeoDataFrame(geometry=[LineString([(0, -10), (1000, -10)])], crs=CRS)),
+        NetworkSource("shore", gpd.GeoDataFrame(geometry=[LineString([(0, 0), (1000, 0)])], crs=CRS), kind=PADDLE),
+        NetworkSource("launch", gpd.GeoDataFrame(geometry=[LineString([(500, -10 + gap), (500, -gap)])], crs=CRS), kind=LAUNCH),
+    ]
+    graph = build_network(sources, bridge_m=0, metric_crs=CRS)
+    tie = graph.edges[graph.edges["kind"].eq(LAUNCH)].iloc[0]
+    for node, kind in ((tie.from_node, PATH), (tie.to_node, PADDLE)):
+        incident = graph.edges[graph.edges["from_node"].eq(node) | graph.edges["to_node"].eq(node)]
+        assert incident["kind"].eq(kind).any()

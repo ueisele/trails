@@ -68,7 +68,7 @@ would draw it without a change.
   2026-09-21.** Review extended the scope to the shared chain and edge builders. Directed
   sources record canonical reversal; their edges recover the supplied direction and keep
   it when split. The acceptance test covers a reversed line noded in the middle.
-- **k and P — 1.5 and 2.** The three-leg browser sweep settles these prices; review accepted them. `OPEN_WATER_FACTOR` keeps 1.5 and `PORTAGE_FACTOR` supplies 2. Measurements and the phase 2 built note are under §5. Phase 8 supersedes their water-versus-land trade: these are now secondary prices after land metres.
+- **k and P — 1.5 and 2.** The three-leg browser sweep settles these prices; review accepted them. `OPEN_WATER_FACTOR` keeps 1.5 and `PORTAGE_FACTOR` supplies 2. Measurements and the phase 2 built note are under §5. Phase 8 supersedes their water-versus-land trade; phase 10 prices land by walking's rule. They remain secondary prices after land price.
 - **N50's river size class — closed for phase 1 after measurement, 2026-09-21.** The cached lines carry
   `vannbredde`, with codes 2 and 3; a correspondence to Topografi 50 class 2 is not
   established. Norway's streams remain out; adding them needs that correspondence.
@@ -101,6 +101,14 @@ would draw it without a change.
   were never matched to Topografi 50's class 2 (above), so Norway's streams stayed out.
 
 ## 5. Changes
+
+- 2026-09-25 — phase 10 is built: kayak land price follows walking, ground follows Stay on paths at 3 / 10, and 4,395 path-priced launches join nearby roads to shore. Uwe accepts the shared road noding. The compact line counts the whole way with its split. All 2,400 kayak/walking labels match in both settings; the largest kayak p95 increase is 52%. The measurements and build note are below.
+
+- 2026-09-25 — Uwe accepts launch splits of walking edges: "Ja ich finde das tatsächlich eine Verbesserung. Lasse Codex das so machen." The new entry makes the 55.990 → 68.341 m example cheaper by the unchanged walking rule (132 against 168). This supersedes review's existing-node restriction; walking differentials remain gates, while cheaper new walking ways and the random-pair change distribution are reported.
+
+- 2026-09-25 — Uwe replaces phase 10's fixed ground factor 10 with walking's `offPath()` (3 off, 10 on), keeping Stay on paths visible in kayak mode. Review limits launch starts to existing walking nodes. The original Kloten/phone-2 short landing has none within 30 m; a farther 21.321 m tie serves phone-2 with Stay on paths but leaves Kloten P1's western departure unchanged. The requested landing check stops with these figures; no production change is built.
+
+- 2026-09-25 — Uwe decides phase 10: prefer walking source prices under water-first, ground at 10, launches within 30 m and a complete compact distance split. A local browser diagnostic stops on walking invariance: shared launch noding changes a walking way from 55.990099 to 68.341328 m in both settings without using a launch edge. The topology scope needs review; no production change is built.
 
 - 2026-09-25 — phase 9 is built: dissolved Marktäcke paddle water and the shared Swedish grid, 5 m shores on all maps, 25 m dam exclusions for network and kayak connectors, reattached streams and measured replacement MK fixtures. All 1,800 final labels match the reference; kayak/inland drives pass twice per page, walking readings and hooks pass. Uwe’s 2026-09-24 walking decision stands; no push or publication.
 
@@ -153,6 +161,278 @@ would draw it without a change.
 - 2026-09-21 — phase 3 (`7f68137`): lakes levelled per connected body in the build (150 bodies from the register, 1,005 from the shore's 10th percentile; median difference 0.25 m, largest 2.82 m), paddled parts flat and continuous in the profile, the heading *2.47 km 🛶 · 3.51 km 🚶*, *by kayak* and *portage on foot* in words, paddled points in the GPX and the Garmin course; the dry way byte-identical in both walking settings. Two stops (the shore's tiles, the body's identity).
 - 2026-09-21 — phase 2 (`bea479c`): the Kayak switch beside *Stay on paths*, the prices per mode, direction as a predicate on the step, the mode's cheapest metre as the floor, snapping by node eligibility, a paddled edge tallied like a ferry for marking but inside the reserve; the sweep settled **k = 1.5, P = 2**. Three stops on the way (the search's direction, where the settings come from, the tally); the built-note below.
 - 2026-09-21 — phase 1 (`ac467b2`): the water network in the build — Shore, Open water, Streams of kind `PADDLE`, portage chords and their ties as `BRIDGE`, `NetworkSource.directed` carried to a per-edge `one_way`; the built-note below. Two stops on the way, both the plan's (the flow test, the layer of the direction).
+
+### Phase 10 — Carry on paths, launch at road ends, 2026-09-25
+
+Uwe, translated: *"Also with the kayak, paths are to be preferred. Pathless is
+even harder with a kayak. I would rather follow a path for 200 m than drag 20 m
+over a bog. Only the last few metres are always fine."* — *"Can't we leave it
+exactly as for walking?"* He initially chooses ground factor 10, the last metres up to
+30 m and the panel correction. The plan's phase 10 records the full rule and
+required measurements. Land price replaces physical land metres as primary;
+the walking source factors stay exact, PORTAGE and connector ground cost `offPath()`,
+and water/ferries contribute zero. Existing secondary prices retain P = 2.
+Launches cost 1 in both objectives and are excluded from walking. Walking
+prices remain unchanged; the topology decision below accepts new entry nodes.
+The initial fixed 10 is superseded as follows.
+
+**Uwe's revised decision, 2026-09-25.** After asking what Kayak and Stay on
+paths mean together, he asks *"Sollten wir das dann nicht doch so für Kajak machen?"*
+— *"Ja"* ("Shouldn't we then do it that way for kayaking after all?" — "Yes"). Ground in the land-price primary
+follows the walking switch exactly: `offPath()`, **3 off / 10 on**. This also
+prices PORTAGE-kind edges; walking source factors, zero primary for paddle and
+ferry, and launch price 1 stand. The secondary price is unchanged. Stay on paths
+stays visible in kayak mode. The interim proposal to hide it is dropped, not
+implemented. The phase-10 measurements, kayak reference comparisons and p95
+now cover both switch settings; drives state and restore their setting and
+demonstrate a route change where the ground/path trade produces one.
+
+**Uwe's topology decision, 2026-09-25, superseding review.**
+*"Ja ich finde das tatsächlich eine Verbesserung. Lasse Codex das so machen."*
+— "Yes, I actually think that is an improvement. Let Codex do it that way."
+Launches may split walking edges. The explanation was the **55.990 → 68.341 m**
+walking case: a new entry offers about **25 m ground + 43 m road**, costing
+**132 instead of 168** under the unchanged walking rule. Walking can use the
+new junction; the launch itself remains kayak-only. This supersedes review's
+existing-nodes-only restriction, not Uwe's 3/10 switch decision.
+
+Walking differentials must match the exhaustive reference on the new graphs:
+200 pairs per map in both settings. Random-pair changes are reported as a
+distribution. Every moved recorded walking reading gets before/after figures
+and a reason. A reading stops the phase only when its length moves beyond
+max(2 %, 50 m) **and** its new way is not cheaper than the old way re-priced on
+the new graph. Longer path carries are expected in kayak; p95 is reported in
+both settings and stops only if it more than doubles.
+
+**Stopped — a kayak-only tie changes shared walking topology.**
+`water.build` passes portages and walking sources through the same
+`build_network` noding. A passing-road launch needs a road split. The browser's
+walking search admits connectors to every node, not just nodes whose incident
+edges are walkable, and its snap logic prefers junctions within `NODE_FIRST_M`
+of the nearest edge distance. The new road node has walkable incident edges.
+Excluding the launch kind therefore leaves both a new walking entry/exit and
+a new walking snap target.
+
+The read-only browser experiment uses the existing Malingsbo-Kloten page
+(SHA-256 `fb4a454897e186533794b26903dc76501fd09fe439946f8b7b68128936005d4b`),
+Firefox 153.0, and the investigation's 7.188 m z17 snap reach. Its router,
+connector-price and snapping source regions match this checkout after
+whitespace normalization. No kayak weighting is enabled in this experiment.
+The nearest point on road edge **45003** to bay shore node **93159** is
+**(59.897876698495, 15.288431594724)**, **6.443628 m** away in EPSG:3006.
+In browser memory the existing road geometry is split at that point, giving
+node **145558**. The same measurement is repeated with a diagnostic PORTAGE
+tie to the shore; its walking price is infinite and none of the answers uses
+it. This isolates noding rather than claiming a completed launch generator.
+
+| Input / setting | Length before → after m | Price before → after |
+|---|---:|---:|
+| East of launch → junction / ordinary | 55.990099 → 68.341328 | 167.970298 → 131.662202 |
+| East of launch → junction / paths | 55.990099 → 68.341328 | 559.900994 → 307.973575 |
+| Phone-2 1→2 / either | 175.288968 → 175.288968 | 227.875659 → 227.875659 |
+| Phone-2 2→3 / either | 43.164309 → 43.153989 | 56.113602 → 56.100185 |
+
+The first pair is **(59.897876698495, 15.288881594724) →
+(59.897507, 15.288204)**. Both versions retain an off-network start and the
+same destination node 33831. Before noding, the whole direct line wins. After,
+the new road node offers **25.187339 m** of ground followed by **43.153989 m**
+on Topografi 50 roads at factor 1.3. The route gains **12.351228 m** while
+becoming cheaper under the unchanged walking rule. The phone-2 input retains
+the investigation's coordinates, including point 3 at **(59.897891, 15.288320)**;
+walking snaps it to the road, then to the new road junction after the split.
+That independent effect changes even the short road-to-road leg by **0.010320 m**.
+
+The six cases' lengths and prices are identical between the split-only and
+split-plus-tie variants. All **12** before/after search labels in the latter
+match the exhaustive reference within `1e-10` price units. Neither price nor
+pruning is faulty. No assertion about the 600 seeded pairs or the drive's
+recorded walking scenes follows from this small diagnostic.
+
+**Question at the first stop, resolved by review below:** include preservation of the pre-launch walking
+topology, with separate kayak junctions/entry sets/snapping and unchanged
+walking geometry, or accept walking changes from the shared noding. The
+recommendation is the former, retaining Uwe's walking invariant. No such
+topology choice has been implemented or attributed to Uwe. Hiding only launch
+edges or only snap targets is insufficient; the available connector entries
+also change. Phase 9's accepted noding changes do not grant an exception to
+phase 10's explicit byte-identical walking requirement.
+
+**Build status.** No production implementation, graph/map build or figure
+update. The source/kind choice, spacing and access measurements, price/panel
+changes, reader comparisons, all-map differentials and p95 measurement,
+twice-green selected drives and full `command make drive-all` are pending.
+The diagnostic preserves the page files, original graph and plan, restores
+both modes, and does not set a goal. One harness at a time, each capped at
+8 GiB. No shared-cache write, source download, tile build, push or publication.
+
+Evidence: `~/mockups/kayak-mode/phase10/{launch-candidate.json,noding.js,
+noding.json,noding-with-tie.json,noding-summary.json,harness.py,probe.js,reference.js}`.
+From this checkout, reproduce with an 8 GiB address-space limit and
+`uv run --offline --with playwright==1.62.0 python
+/home/eiseleu/mockups/kayak-mode/phase10/harness.py malingsbo-kloten noding.js repeat.json`.
+The harness reads the unchanged main checkout's built page; it does not fetch
+remote assets or replace this worktree's unbuilt page.
+
+**Validation of this stop.** `command make hooks-run` passes with network
+access, including ruff format/check, mypy, tests and all standard hooks.
+`~/mockups/kayak-mode/phase10/hooks.log` records the run. Only the two records
+change; this validation does not claim a phase-10 production build.
+
+**Review decision after the stop, 2026-09-25.** Launch starts are existing
+walking-network nodes only; no walking edge may be split for a launch. A dead
+end is already a node. A passing road needs an existing node within 30 m of
+water, or it gets no launch there. Only the paddle shore may be re-noded.
+Walking remains byte-identical. Measure the passing locations lost against
+the splitting prototype and check the phone-2 and Kloten northern landings
+first. If they do not get launches, stop with the figures so Uwe can decide
+whether walking may change. This topology rule is review's decision; the
+switch pricing above is Uwe's.
+
+**Landing check after review — original location absent, farther access exists.**
+The source graph saved by phase 9 has 289,548 edges. Its existing PATH/BRIDGE
+nodes within 500 m of the northern-shore reconstruction were measured in
+EPSG:3006 against the source lake and paddle Shore. The closest node to both
+the original northern landing Q and phone-2's shore point is **33831**, at
+**(59.897507124140, 15.288203668912)**. This is a road junction of walking
+degree 3, not a dead end. Its nearest source water is **42.075943 m** away;
+its nearest simplified Shore point is **42.534528 m** away. Node **33832**,
+also degree 3, is **50.845958 m** from source water. Neither qualifies.
+
+The published page's coordinate quantum gives node 33831 at
+**(59.897507, 15.288204)**. With those encoded coordinates its distances are
+**42.089910 m** to source water, **43.254364 m** to shore node **93159**,
+and **58.834956 m** to Q. These are EPSG:3006 lengths; the browser's metre
+calculation makes the point-2 → point-3 tie **43.271516 m**. The difference
+between source and encoded coordinates is reported rather than mixed into
+the 30 m test; both versions fail it.
+
+The previous splitting prototype contained **one investigated site**, at
+**(59.897876698495, 15.288431594724)**, opposite shore node 93159. That
+original launch location is lost: **one site → zero retained there**. It was
+a noding diagnostic, not a complete launch generator, and did not establish
+map-wide counts or certify the tie's land-only geometry. There are no Abisko
+or Norway prototype launch catalogues against which to invent loss totals.
+
+However, **node 24433 on the same road qualifies farther north**. Its source
+position is **(59.899237772676, 15.289714526724)**, walking degree 3, meeting
+Topografi 50 roads and paths. It is **19.968740 m** from source water and
+**20.368276 m** from the simplified shore. Its nearest existing shore node
+is **93164**. On the page their coordinates are
+**(59.899238, 15.289715) → (59.899302, 15.289356)**, with tie length
+**21.320689 browser metres / 21.312238 EPSG:3006 metres**. The encoded origin
+is **19.979110 m** from source water. The tie intersects **0 m** of the cached
+Marktäcke water union; its origin is **4,454.072059 m** from the nearest dam
+centre, leaving the whole short segment clear of the 25 m disc. It uses two
+existing nodes and needs no noding. The Shore route from point 3 to this
+landing is **191.706571 browser metres / 191.630581 metric metres**.
+The road therefore retains **one confirmed farther candidate**, although
+the original site has none. These counts distinguish relocation from loss.
+
+**Local price experiment, both switch settings.** An in-memory graph clone
+adds just the farther tie. Its diagnostic source uses PORTAGE's exclusion
+on foot with an explicit factor-1 override in both kayak objectives; this
+does not select a production source/kind. The existing investigation probe
+supplies the new land-price rule at `offPath()`. It preserves connector
+sampling, the secondary price and all original node positions. The unchanged
+main checkout page has the same SHA-256 as at the first stop above.
+
+The five inputs are the investigation's reconstructions, not recovered phone
+taps: P1 **(59.895949196, 15.288015230)**, northern Q
+**(59.898026273, 15.288010427)**, P2 proxy
+**(59.952981501, 15.278743062)**, off-road start
+**(59.895949196, 15.288465230)**, phone point 2
+**(59.897507, 15.288204)** and point 3 **(59.897891, 15.288320)**.
+Snap reach stays **14.377 m** for the original Kloten pairs and **7.188 m**
+for phone-2. The plan's phase-10 table records physical carry/paddle totals
+for the old rule and the new rule plus the farther tie in both settings.
+`route-summary.json` also retains the new rule without any launch.
+
+Phone-2 1→2 changes **173.877045 → 175.288968 m** on foot and takes the road
+with either setting. Phone-2 2→3 stays the **43.271516 m** straight connector
+with the switch off; its land price is **129.814548**. With the switch on,
+the same line costs **432.715161** in the primary objective and loses to
+**297.388133** for the road plus launch. That answer carries **233.680261 m**,
+including the **21.320689 m** tie, and paddles **191.706571 m** back to point 3.
+Its secondary price is **765.162149**. This provides a measured switch-sensitive
+example for a future drive; no drive reading is installed at this stop.
+
+Kloten P1 → Q instead changes **231.408313 / 0 → 411.030953 / 620.693615 m**
+carried/paddled in both settings. It takes the western connection, as does
+P1 → P2, unchanged at **411.030953 / 7,088.969083 m**. The off-road start
+changes **196.752924 / 6,920.199608 → 399.583052 / 7,088.969083 m**, again
+west, in both settings. These are the router-sampled physical lengths; the
+public profile's more detailed shoreline split is a different measurement.
+The road way from P1 via point 2 and the farther tie has primary
+**525.263792**, whereas the western way costs **482.156276**. The road
+factor 1.3 and western path factors account for this choice. The accepted
+preference for walking source prices does not guarantee use of a nearby launch.
+
+Five pairs × two settings × three variants (old rule, new rule, new rule plus
+farther tie) give **30 labels**, all matching the unpruned reference within
+`1e-8` for both objectives. No claim about the seeded suite or p95 follows
+from these local comparisons. Each harness runs alone under an 8 GiB cap,
+restores the modes and price wrapper, and never changes a goal, saved plan,
+published page or the original graph. No production file is changed.
+
+**Stopped at the requested landing check.** There is no existing-node launch
+at the original short landing. The farther same-road candidate is reported
+explicitly: it helps phone-2 with the switch on but does not change the
+Kloten P1 departures. Uwe must decide whether that relocated access is
+acceptable or whether walking may change to admit the original short tie.
+The prior topology scope question is resolved by review's existing-node rule;
+this stop does not reopen it or propose a separate walking graph.
+
+**Build status after the landing check.** Records only. The revised price,
+launch generation and panel change remain unbuilt, as do the three-map
+catalogue/spacing/loss measurements, full reader sweep, both-setting seeded
+kayak reference and timing runs, walking invariance, graph/map builds,
+twice-green selected drives and full `drive-all`. No source download, shared
+cache change, tile build, push or publication. Evidence is under
+`~/mockups/kayak-mode/phase10/existing-nodes/`: `measure.py`, `local-nodes.json`,
+`audit.py`, `audit.json`, `browser.json`, `routes-checked.json` and
+`route-summary.json`. The browser scripts are `../existing-nodes.js` and
+`../existing-node-routes.js`, using the retained `../harness.py`.
+
+**Validation of the landing stop.** `command make hooks-run` passes with
+network access: ruff format/check, mypy, tests and all standard hooks. The log
+is `~/mockups/kayak-mode/phase10/existing-nodes/hooks.log`. Only the two records
+change; the local route audit is not a substitute for the pending release checks.
+
+**Built 2026-09-25 — Carry on paths, launch at road ends.** Uwe's revised
+3 / 10 switch rule and shared road noding are implemented; the fixed 10 and
+review's existing-node-only restriction remain superseded. `Launches` has its
+own `LAUNCH` kind, priced at 1 in both objectives and excluded from walking
+and walking snaps. P = 2 remains secondary. The compact kayak line gives the
+whole distance, then paddle and foot; walking keeps its plain figure.
+
+The measured 100 m shore spacing gives **2,220 Malingsbo-Kloten**, **350 Abisko**
+and **1,825 Lomsdal-Visten** ties, all connected. **808 / 162 / 494** supply
+new access within 500 m of old land-network travel to the same undirected
+paddle component. The short Kloten tie is a passing-road launch, road node
+**141123** to shore **94456**, **6.413967 m** long and **6.085713 m** from the
+road foot to source water. It serves phone-2's 2→3 and P1's northern shore
+in both settings; phone-2's 1→2 follows **175.289 m of road** in both.
+
+All **1,200 kayak** and **1,200 walking** labels match the reference. Kayak
+p95 increases **17–52%**, never doubling. All **264 frozen recorded walking
+readings** pass the old-way price gate; the **103** whose metre figures move
+at three decimals are listed. Longer carries are expected: the largest rises
+**36,995.003 m**, on Norway pair 198 with Stay on paths on. The
+[phase-10 measurements](kayak-mode-phase10-measurements.md) include both
+settings, spacing and length distributions, Kloten and phone-2, scene triples,
+the phase-2 sweep, Korslångssmedja, pair totals and all larger changes. The
+[plan's build note](kayak-mode-phases.md#phase-10--carry-on-paths-launch-at-road-ends)
+records the implementation choice separately from Uwe's decisions.
+
+The selected kayak and new readings are green twice on each page. The complete
+`command make drive-all` run is green too: **4,983 readings**, no broken
+invariants or moved figures. The full suite's dry-profile sample counts and
+renumbered road fixture are measured and recorded without weakening a gate.
+
+`command make hooks-run` is green with network access: formatting, lint, mypy,
+both pytest suites and the standard hooks. The three graph/map builds used
+cached inputs, one at a time under 8 GiB. Phase 10 ends here, with no pending
+price or topology decision, no push and no publish.
 
 ### Phase 9 — A finer shore, 2026-09-24
 

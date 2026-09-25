@@ -101,7 +101,7 @@
             // connector, handed in rather than spelled here: renaming either in
             // trails.routing.sources would otherwise leave this page reading
             // every ferry as walked ground, and nothing would look wrong.
-            var CROSSING = PLAN.crossingKind, CONNECTOR = PLAN.connectorKind, PADDLE = PLAN.paddleKind, PORTAGE = PLAN.portageKind;
+            var CROSSING = PLAN.crossingKind, CONNECTOR = PLAN.connectorKind, PADDLE = PLAN.paddleKind, PORTAGE = PLAN.portageKind, LAUNCH = PLAN.launchKind;
 
             // How each kind is drawn. Routed is a line; ground drawn straight
             // across is dashed exactly as the profile dashes it; a crossing is a
@@ -169,14 +169,15 @@
 
                 for (i = 0; i < edges; i += 1) {
                     var source = graph.header.sources[graph.sources[i]];
-                    // Ferries cross water too: paddle and ferry edges count no
-                    // land; every other kind counts its metres in a kayak.
-                    // The ferry's flat secondary price remains below.
-                    land[i] = kayak() && source.kind !== PADDLE && source.kind !== CROSSING ? length[i] : 0;
-                    if (source.kind !== CROSSING && source.kind !== CONNECTOR && (kayak() || (source.kind !== PADDLE && source.kind !== PORTAGE))) {
+                    // Water comes first. On land the walking rule chooses a
+                    // path; a launch is the last few metres at path price.
+                    land[i] = kayak() && source.kind !== PADDLE && source.kind !== CROSSING
+                        ? length[i] * (source.kind === PORTAGE ? offPath() : source.kind === LAUNCH ? 1 : source.factor) : 0;
+                    if (source.kind !== CROSSING && source.kind !== CONNECTOR && (kayak() || (source.kind !== PADDLE && source.kind !== PORTAGE && source.kind !== LAUNCH))) {
                         snapNodes[graph.fromNode[i]] = 1; snapNodes[graph.toNode[i]] = 1;
                     }
-                    if ((source.kind === PADDLE || source.kind === PORTAGE) && !kayak()) { cost[i] = Infinity; }
+                    if ((source.kind === PADDLE || source.kind === PORTAGE || source.kind === LAUNCH) && !kayak()) { cost[i] = Infinity; }
+                    else if (source.kind === LAUNCH) { cost[i] = length[i]; }
                     else if (source.kind === PORTAGE) { cost[i] = length[i] * offPath() * PLAN.portageFactor; }
                     else if (source.flatM === undefined) {
                         cost[i] = length[i] * source.factor * (kayak() && source.kind !== PADDLE && source.kind !== CROSSING
@@ -224,7 +225,7 @@
             // when a node is reached more cheaply — the stale one is popped and
             // recognised by its lexicographic label. Keeping stale entries is
             // cheaper here than finding and removing them.
-            // In a kayak, any saving on land wins before the old price is read.
+            // In a kayak, any saving in land price wins before the secondary price.
             // Walking supplies zero land throughout, retaining its old ordering.
             function cheaper(land, cost, otherLand, otherCost) {
                 return cost < Infinity && (land < otherLand || (land === otherLand && cost < otherCost));
@@ -287,14 +288,14 @@
             // matters, even when the search works back from its destination.
             function allowed(graph, edge, downstream) {
                 var kind = graph.header.sources[graph.sources[edge]].kind;
-                return (kayak() || (kind !== PADDLE && kind !== PORTAGE)) &&
+                return (kayak() || (kind !== PADDLE && kind !== PORTAGE && kind !== LAUNCH)) &&
                     (!graph.oneWay[edge] || downstream);
             }
 
             function endsOf(graph, point, entering) {
                 if (point.edge >= 0) {
                     var kind = graph.header.sources[graph.sources[point.edge]].kind;
-                    if (kind === CROSSING || ((kind === PADDLE || kind === PORTAGE) && !kayak())) { return []; }
+                    if (kind === CROSSING || ((kind === PADDLE || kind === PORTAGE || kind === LAUNCH) && !kayak())) { return []; }
                 }
                 if (point.node >= 0) { return [{node: point.node, cost: 0, land: 0, cut: null}]; }
                 if (!(point.edge >= 0)) { return []; }
@@ -416,8 +417,8 @@
                         head: seed.cut, tail: flipCut(found.target.cut)};
             }
 
-            // Optimistic land distances from the start include travel over the
-            // network, not just a globally cheapest entry. Whole-metre floors
+            // Optimistic land prices from the start include travel over the
+            // network, not just a globally cheapest entry. Integer price floors
             // add exactly and stay below floating-point sums in either order.
             function entryLandFloors(graph, starts, limit) {
                 var work = router(graph), nodes = graph.header.nodes;
@@ -630,7 +631,7 @@
                         // counts actual samples; no distance to water is
                         // treated as land without reading the connector.
                         if (graph.water) {
-                            var dryMetres = dryPoint === from ? wetHead.land : wetTail.land;
+                            var dryMetres = (dryPoint === from ? wetHead.land : wetTail.land) / offPath();
                             prefixSamples = Math.min(32, Math.max(16, 1 + Math.ceil(dryMetres / graph.water.cellM)));
                         }
                         if (cheaper(wetHead.land + wetTail.land, wetHead.cost + wetTail.cost, leastLand, cheapest)) {
@@ -652,7 +653,7 @@
                     // Wet ends retain the lazy queue's useful water-way bound.
                     if (eager) {
                         // The integer prefix floor plus floor(suffix land)
-                        // bounds a whole way. Subtract one metre when comparing
+                        // bounds a whole way. Subtract one price unit when comparing
                         // it with an unrounded connector's land instead.
                         var requiredIn = entryBounds ? Math.max(entryLand, entryBounds[i] - 1) : entryLand;
                         if (!cheaper(requiredIn, leave, leastLand, cheapest)) { continue; }
@@ -670,7 +671,7 @@
                         var pieces = graph.water ? Math.max(1, Math.ceil(leaveM / graph.water.cellM)) : 1;
                         var dry = connectorDryPrefix(graph, graph.nodeLon[i], graph.nodeLat[i], to.lon, to.lat, leaveM, pieces, Math.max(0, leastLand - entryLand), prefixSamples);
                         leaveLengths[i] = leaveM; leaveDry[i] = dry;
-                        leaveLand = leaveM * dry / pieces;
+                        leaveLand = leaveM * dry / pieces * offPath();
                     }
                     if (!cheaper(entryLand + leaveLand, leave, leastLand, cheapest) ||
                             (entryBounds && !cheaper(entryBounds[i] + Math.floor(leaveLand), leave, leastLand, cheapest))) { continue; }
@@ -736,7 +737,7 @@
                         // The connector must beat both this node's exact
                         // suffix and the whole-way bound, including the entry
                         // nobody can avoid. Keep the sum for the latter rather
-                        // than subtracting rounded land metres from its limit.
+                        // than subtracting rounded land prices from its limit.
                         var required = entryBounds ? Math.max(entryLand, entryBounds[seed.node] - 1) : entryLand;
                         var nodeBound = bestLand[seed.node] + required < leastLand;
                         var truly = connectorPrice(graph, graph.nodeLon[seed.node], graph.nodeLat[seed.node], to.lon, to.lat,
@@ -841,7 +842,7 @@
                 // midpoint is strictly inside known dry cells, including when
                 // the node is inside the box; rounding at a cell edge cannot
                 // turn a possibly wet midpoint into a compulsory land metre.
-                return length * Math.max(0, Math.floor(t * pieces) - 1) / pieces;
+                return length * Math.max(0, Math.floor(t * pieces) - 1) / pieces * offPath();
             }
 
             // A square stopping before the nearest opposite-kind cell is
@@ -911,7 +912,7 @@
                     }
                     read += count;
                     if (isWet) { wet += count; }
-                    else if (landLimit !== undefined && (precedingLand || 0) + length * (read + dryKnown - wet) / pieces > landLimit) {
+                    else if (landLimit !== undefined && (precedingLand || 0) + length * (read + dryKnown - wet) / pieces * offPath() > landLimit) {
                         return -1;
                     }
                     sample += direction * count;
@@ -936,7 +937,7 @@
                     var t = (i + 0.5) / pieces;
                     if (connectorWaterAt(graph, aLon + t * (bLon - aLon), aLat + t * (bLat - aLat))) { break; }
                     dry += 1;
-                    if (length * dry / pieces > landLimit) { break; }
+                    if (length * dry / pieces * offPath() > landLimit) { break; }
                 }
                 return dry;
             }
@@ -953,7 +954,7 @@
                 // Rejected connectors need no secondary price at all.
                 var ground = offPath() * PLAN.portageFactor, waterPrice = openWaterFactor(graph);
                 var water = length * wet / pieces;
-                return {cost: (length - water) * ground + water * waterPrice, land: length * (pieces - wet) / pieces};
+                return {cost: (length - water) * ground + water * waterPrice, land: length * (pieces - wet) / pieces * offPath()};
             }
 
             // The grid prices each piece at its midpoint. A map without a grid
@@ -966,7 +967,7 @@
                 }
                 var ground = offPath() * (kayak() ? PLAN.portageFactor : 1);
                 var waterPrice = kayak() ? openWaterFactor(graph) : PLAN.waterFactor;
-                if (!grid || (!kayak() && !(waterPrice > ground))) { return {cost: length * ground, land: kayak() ? length : 0}; }
+                if (!grid || (!kayak() && !(waterPrice > ground))) { return {cost: length * ground, land: kayak() ? length * offPath() : 0}; }
                 var pieces = Math.max(1, Math.ceil(length / grid.cellM)), wet = 0, backwards = false;
                 for (var i = known ? known.dry : 0; i < pieces; i += 1) {
                     // A dry first sample makes this end useful for reaching
@@ -975,7 +976,7 @@
                     var sample = backwards && i ? pieces - i : i;
                     var t = (sample + 0.5) / pieces;
                     if (connectorWaterAt(graph, aLon + t * (bLon - aLon), aLat + t * (bLat - aLat))) { wet += 1; }
-                    else if (landLimit !== undefined && (precedingLand || 0) + length * (i + 1 - wet) / pieces > landLimit) {
+                    else if (landLimit !== undefined && (precedingLand || 0) + length * (i + 1 - wet) / pieces * offPath() > landLimit) {
                         return {cost: Infinity, land: Infinity};
                     }
                     if (landLimit !== undefined && i === 0 && wet) { backwards = true; }
@@ -983,7 +984,7 @@
                 var water = length * wet / pieces;
                 // Count dry pieces directly: subtracting two rounded lengths
                 // could give an all-water connector a negative land cost.
-                return {cost: (length - water) * ground + water * waterPrice, land: kayak() ? length * (pieces - wet) / pieces : 0};
+                return {cost: (length - water) * ground + water * waterPrice, land: kayak() ? length * (pieces - wet) / pieces * offPath() : 0};
             }
 
             function priced(graph, aLon, aLat, bLon, bLat) {
@@ -1105,7 +1106,7 @@
                 // which is what a connector is — so it names no source and
                 // answers nothing about marking. Its ground is walked and
                 // counted, apart, under its own name.
-                if (source.kind === CONNECTOR || source.kind === PORTAGE) { out.undrawn += metres; return; }
+                if (source.kind === CONNECTOR || source.kind === PORTAGE || source.kind === LAUNCH) { out.undrawn += metres; return; }
                 out.sources[source.name] = (out.sources[source.name] || 0) + metres;
                 // No register marks water. Both kinds keep their source
                 // credit without a marking bucket; paddling, unlike a ferry,
@@ -1343,7 +1344,7 @@
                         for (var e = index.at[cell]; e < index.at[cell + 1]; e += 1) {
                             var edge = index.item[e];
                             var kind = graph.header.sources[graph.sources[edge]].kind;
-                            if (kind === CROSSING || kind === CONNECTOR || ((kind === PADDLE || kind === PORTAGE) && !kayak())) { continue; }
+                            if (kind === CROSSING || kind === CONNECTOR || ((kind === PADDLE || kind === PORTAGE || kind === LAUNCH) && !kayak())) { continue; }
                             var v = index.vert[e];
                             var ax = co[2 * v], ay = co[2 * v + 1];
                             var ex = (co[2 * v + 2] - ax) * lonScale, ey = co[2 * v + 3] - ay;
@@ -5899,6 +5900,10 @@
                 var said = [];
                 if (lastFigures) {
                     said.push((lastFigures.metres / 1000).toFixed(2) + ' km');
+                    if (lastFigures.kayak) {
+                        said.push((lastFigures.water / 1000).toFixed(2) + ' km 🛶');
+                        said.push((lastFigures.foot / 1000).toFixed(2) + ' km 🚶');
+                    }
                     if (isFinite(lastFigures.ascent)) {
                         said.push('\u2191' + Math.round(lastFigures.ascent) + ' m');
                     }
@@ -6199,7 +6204,8 @@
             // seam the profile panel already uses to say what is selected.
             function sayPlanning(shape) {
                 var figure = shape && points.length > 1 ? figuresOf(shape) : null;
-                lastFigures = shape ? {metres: shape.total, ascent: figure ? figure.ascent : NaN} : null;
+                lastFigures = shape ? {metres: shape.total + (shape.kayak ? shape.crossed : 0),
+                    foot: shape.total, water: shape.crossed, kayak: shape.kayak, ascent: figure ? figure.ascent : NaN} : null;
                 paintFigures();
                 // Handed over once, on the first refresh there is a panel for:
                 // by then everything that draws into it exists, and asking again
@@ -6209,7 +6215,10 @@
                 window.trailsChrome.planning({
                     on: on,
                     points: points.length,
-                    metres: shape ? shape.total : 0,
+                    metres: lastFigures ? lastFigures.metres : 0,
+                    foot: shape ? shape.total : 0,
+                    water: shape ? shape.crossed : 0,
+                    kayak: shape ? shape.kayak : kayak(),
                     ascent: figure ? figure.ascent : null,
                     undoable: history.length,
                     working: settling > 0

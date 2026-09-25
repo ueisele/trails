@@ -33,7 +33,7 @@ from trails.routing.noding import (
     intersection_points,
     lines_of,
 )
-from trails.routing.sources import BRIDGE, FERRY, PORTAGE, NetworkSource
+from trails.routing.sources import BRIDGE, FERRY, LAUNCH, PADDLE, PATH, PORTAGE, NetworkSource
 from trails.routing.topology import UnionFind, cluster_points, dense_ids
 
 #: Loose ends closer than this to another node are joined. Sources disagree
@@ -60,7 +60,7 @@ EDGE_COLUMNS = ("from_node", "to_node", "cost", "source", "kind", "chain_id", "l
 
 
 def _inferred(kind: str) -> bool:
-    return kind in (BRIDGE, PORTAGE)
+    return kind in (BRIDGE, PORTAGE, LAUNCH)
 
 
 @dataclass(frozen=True)
@@ -138,6 +138,7 @@ def build_network(
     chains = gpd.GeoDataFrame(pd.concat(built, ignore_index=True), geometry="geometry", crs=metric_crs)
 
     edges, nodes, stopped = _split_into_edges(chains, {source.name: source for source in sources}, ferry_cost_m, tolerance_m)
+    edges, nodes, stopped = _join_launches(edges, nodes, stopped, tolerance_m)
     edges, nodes = _with_bridges(edges, nodes, stopped, bridge_m, bridge_cost_factor, tolerance_m)
 
     # Inferred chords take part in noding but are never a selectable way.
@@ -273,6 +274,62 @@ def _split_into_edges(
     stopped = np.ones(len(nodes), dtype=bool)
     np.logical_and.at(stopped, identifiers, np.asarray(stops)[surviving])
     return edges, nodes, stopped
+
+
+def _join_launches(
+    edges: gpd.GeoDataFrame, nodes: gpd.GeoDataFrame, stopped: np.ndarray, tolerance_m: float
+) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, np.ndarray]:
+    """Node projected launch ends without relying on exact overlay intersections.
+
+    A shortest-line endpoint can miss its target segment by floating-point
+    rounding. Join within the existing noding tolerance, including to the full
+    geometry of a path whose copy was simplified for ordinary intersections.
+    These are shared junctions, not separately priced inferred bridges.
+    """
+    launches = edges["kind"].eq(LAUNCH)
+    if not launches.any():
+        return edges, nodes, stopped
+    ends = np.unique(edges.loc[launches, ["from_node", "to_node"]].to_numpy().ravel())
+    eligible = np.flatnonzero(edges["kind"].isin((PATH, PADDLE)).to_numpy())
+    tree = shapely.STRtree(edges.geometry.to_numpy()[eligible])
+    pairs = tree.query(nodes.geometry.to_numpy()[ends], predicate="dwithin", distance=tolerance_m)
+    cuts: dict[int, list[float]] = {}
+    reached: list[tuple[int, int, float]] = []
+    for endpoint, target in pairs.T:
+        node, edge = int(ends[endpoint]), int(eligible[target])
+        row = edges.iloc[edge]
+        if node in (row.from_node, row.to_node):
+            continue
+        along = float(row.geometry.project(nodes.geometry.iloc[node]))
+        reached.append((node, edge, along))
+        if tolerance_m < along < row.geometry.length - tolerance_m:
+            cuts.setdefault(edge, []).append(along)
+    if not reached:
+        return edges, nodes, stopped
+    boundaries, replacements, added = _split_edges(edges, cuts, len(nodes), tolerance_m)
+    joined = UnionFind(len(nodes) + len(added))
+    for node, edge, along in reached:
+        row = edges.iloc[edge]
+        if along <= tolerance_m:
+            target = int(row.from_node)
+        elif along >= row.geometry.length - tolerance_m:
+            target = int(row.to_node)
+        else:
+            positions, identifiers = boundaries[edge]
+            at = min(range(len(positions)), key=lambda index: abs(positions[index] - along))
+            target = identifiers[at]
+        joined.union(node, target)
+    labels = dense_ids(joined.labels())
+    grown = gpd.GeoDataFrame(pd.concat([nodes, gpd.GeoDataFrame(geometry=added, crs=nodes.crs)], ignore_index=True), crs=nodes.crs)
+    _, first = np.unique(labels, return_index=True)
+    merged_nodes = grown.iloc[first].reset_index(drop=True)
+    merged_stops = np.ones(len(merged_nodes), dtype=bool)
+    np.logical_and.at(merged_stops, labels, np.concatenate([stopped, np.zeros(len(added), dtype=bool)]))
+    frames = [frame for frame in (edges.drop(index=list(cuts)), replacements) if not frame.empty]
+    merged = gpd.GeoDataFrame(pd.concat(frames, ignore_index=True), geometry="geometry", crs=edges.crs)
+    for column in ("from_node", "to_node"):
+        merged[column] = labels[merged[column].to_numpy(dtype=int)]
+    return merged, merged_nodes, merged_stops
 
 
 def _place_nodes(identifiers: np.ndarray, lands: np.ndarray, exact: np.ndarray, crs: Any) -> gpd.GeoDataFrame:

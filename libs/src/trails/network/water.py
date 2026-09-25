@@ -3,7 +3,7 @@
 import re
 import time
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 import geopandas as gpd
@@ -15,6 +15,7 @@ from shapely.geometry.base import BaseGeometry
 from shapely.ops import substring
 
 from trails.network import graphs
+from trails.network.launches import LAUNCHES, launches
 from trails.routing.coverage import CHAIN_COVERAGE_COLUMNS, chain_coverage
 from trails.routing.elevation import PROFILE_COLUMNS, chain_profiles
 from trails.routing.graph import DEFAULT_BRIDGE_COST_FACTOR, Network, build_network
@@ -47,6 +48,14 @@ LEVEL_GRADIENT = 0.001
 LAKE_BODY = "lake_body"
 LAKE_LEVEL = "lake_level"
 SURFACE_CLASS = "water_class"
+
+
+@dataclass(frozen=True)
+class Access:
+    """Cached, unsimplified water and dam points for checking land-only launches."""
+
+    surfaces: gpd.GeoDataFrame
+    dams: gpd.GeoDataFrame | None = None
 
 
 def _registered_level(value: Any) -> float:
@@ -444,17 +453,19 @@ def build(
     *,
     protected: gpd.GeoDataFrame,
     measure: Callable[[Network], Network],
+    access: Access | None = None,
 ) -> tuple[Network, pd.DataFrame]:
     """Build the combined network without writing into the shared input cache.
 
     Args:
-        sources: Walking and paddled sources; receives the inferred portages
+        sources: Walking and paddled sources; receives inferred portages and launches
         masks: The walking records used to describe ground
         clip: Map extent
         params: Graph construction parameters
         rules: Country's projection and coverage rules
         protected: Protected areas
         measure: Country's height reader
+        access: Unsimplified water and dams for launch checks
 
     Returns:
         Measured combined network and per-source chain counts
@@ -471,15 +482,18 @@ def build(
             ferry_cost_m=params.ferry_cost_km * 1000,
         )
 
-    walking_sources = [source for source in sources if source.kind != PADDLE and source.name not in (PORTAGES, PORTAGE_PATHS)]
+    inferred = (PORTAGES, PORTAGE_PATHS, LAUNCHES)
+    walking_sources = [source for source in sources if source.kind != PADDLE and source.name not in inferred]
     started = time.perf_counter()
     walking = node(walking_sources)
     print(f"  Walking graph build before water: {time.perf_counter() - started:.3f} s; {len(walking.edges):,} edges")
     started = time.perf_counter()
     added = portages([source for source in sources if source.kind == PADDLE], walking)
-    sources[:] = [source for source in sources if source.name not in (PORTAGES, PORTAGE_PATHS)] + added
+    if access is not None:
+        added.append(launches(sources, walking, access))
+    sources[:] = [source for source in sources if source.name not in inferred] + added
     network = node(sources)
-    print(f"  Combined graph build with portages: {time.perf_counter() - started:.3f} s; {len(network.edges):,} edges")
+    print(f"  Combined graph build with carries and launches: {time.perf_counter() - started:.3f} s; {len(network.edges):,} edges")
     report(network)
     network = replace(network, edges=graphs.derive(network.edges, masks, protected, rules))
     covered = chain_coverage(network.chains, network.edges)
@@ -528,7 +542,7 @@ def report(network: Network) -> None:
         network: The combined graph
     """
     print("\nWater in the routing graph:")
-    for name in (*WATER_SOURCES, PORTAGES, PORTAGE_PATHS):
+    for name in (*WATER_SOURCES, PORTAGES, PORTAGE_PATHS, LAUNCHES):
         edges = network.edges[network.edges["source"] == name]
         print(f"  {name}: {len(edges):,} edges, {edges['length_m'].sum() / 1000:.3f} km")
 

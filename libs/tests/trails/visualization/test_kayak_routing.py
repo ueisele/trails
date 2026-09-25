@@ -65,7 +65,7 @@ def readings():
         function keptKey() { return 'fixture'; }
         function refresh() { refreshes++; }
         function refreshGoal() {}
-        var CROSSING = 'ferry', CONNECTOR = 'bridge', PADDLE = 'paddle', PORTAGE = 'portage', NODE_FIRST_M = 2;
+        var CROSSING = 'ferry', CONNECTOR = 'bridge', PADDLE = 'paddle', PORTAGE = 'portage', LAUNCH = 'launch', NODE_FIRST_M = 2;
         var PLAN = {portageFactor:4, offPathFactor:3, waterFactor:30, indexCellM:100, snapM:150, maxStraightM:50000};
         var MARKING = ['marked', 'unmarked', 'unknown'];
         var TALLIED = MARKING.concat(['undrawn', 'recorded', 'unrecorded']);
@@ -117,7 +117,7 @@ def readings():
         g = graph('path',false);
         out.portage = router(g).cost[0];
         out.inferred = [];
-        for (const kind of ['bridge', 'portage']) {
+        for (const kind of ['bridge', 'portage', 'launch']) {
             g = graph(kind,false);
             g.header.sources[1].factor = 1.3;
             for (const mode of [false,true]) {
@@ -153,7 +153,7 @@ def readings():
         out.patchedFloor = cheapestMetre(g);
         out.patchedWater = priced(g,0,0,0.0002,0);
         out.tallies = {};
-        for (const kind of ['paddle', 'ferry', 'path', 'bridge', 'portage']) {
+        for (const kind of ['paddle', 'ferry', 'path', 'bridge', 'portage', 'launch']) {
             g = graph(kind, false);
             g.header.protected = [{id:'reserve'}];
             g.protectedAt = [0,1]; g.protectedArea = [0]; g.protectedShare = [1];
@@ -190,12 +190,12 @@ def readings():
             out.walkShortcut.push(routeBetween(g,at(0),at(2)));
         }
         paddle(true); stayOnPaths(false);
-        // A longer path must lose to less ground even at a cheaper old price.
+        // A longer path beats the shorter carry over ground by walking price.
         g = alternatives([{name:'Open water',kind:'paddle',factor:1.5},
             {name:'path',kind:'path',factor:1},{name:'ground',kind:'portage',factor:1.3}],
             [[0,1,1],[1,2,1],[0,2,2]],[[0,0],[0.0005,0.0005],[0.001,0]]);
         out.lessLand = routeBetween(g,at(0),at(2));
-        // Equal land lengths retain the path's lower price.
+        // The primary price prefers path to ground at equal lengths.
         g = alternatives(g.header.sources,[[0,1,2],[0,1,1]],[[0,0],[0.001,0]]);
         out.landTie = routeBetween(g,at(0),at(1));
         // No subtraction of rounded lengths may make water negative land.
@@ -262,9 +262,11 @@ def readings():
             const nodes=Array.from({length:12},()=>[random()*0.01,random()*0.01]);
             const sources=[{name:'Open water',kind:'paddle',factor:1.5},
                 {name:'Shore',kind:'paddle',factor:1},{name:'path',kind:'path',factor:1},
-                {name:'carry',kind:'portage',factor:3},{name:'ferry',kind:'ferry',flatM:5000}];
+                {name:'carry',kind:'portage',factor:3},{name:'ferry',kind:'ferry',flatM:5000},
+                {name:'launch',kind:'launch',factor:1}];
             const arcs=Array.from({length:18},()=>[Math.floor(random()*10),Math.floor(random()*10),Math.floor(random()*sources.length)]);
             arcs[2][2]=2;
+            arcs[3][2]=5;
             g=alternatives(sources,arcs,nodes);
             g.oneWay=arcs.map(()=>random()<0.3?1:0);
             g.water.cellM=10;
@@ -300,11 +302,15 @@ def readings():
                 }
                 for(const p of [from,to])if(p.node>=0){p.lon=g.nodeLon[p.node];p.lat=g.nodeLat[p.node];}
                 if(pair>=4)[from,to]=[to,from];
-                const chosen=joinedRoute(g,from,to),actual=chosenLabel(g,from,to,chosen);
-                const expected=referenceJoined(g,from,to);
-                out.differential.push({terrain,pair,actual,expected});
+                for(const staying of [false,true]) {
+                    stayOnPaths(staying);
+                    const chosen=joinedRoute(g,from,to),actual=chosenLabel(g,from,to,chosen);
+                    const expected=referenceJoined(g,from,to);
+                    out.differential.push({terrain,pair,staying,actual,expected});
+                }
             }
         }
+        stayOnPaths(false);
         g=resumedGraph;routing=null;
         g.waterAt=()=>false;
         const dryLength=panel().metresBetween(0,0,0.001,0),dryPieces=Math.ceil(dryLength/g.water.cellM);
@@ -436,9 +442,9 @@ def test_switching_rebuilds_prices_and_remembers_the_mode(readings):
     assert readings["persisted"] == "yes"
 
 
-def test_portages_are_unreachable_and_unsnappable_in_both_walking_settings(readings):
+def test_portages_and_launches_are_unreachable_and_unsnappable_in_both_walking_settings(readings):
     for row in readings["inferred"]:
-        if row["kind"] != "portage" or row["mode"]:
+        if row["kind"] not in ("portage", "launch") or row["mode"]:
             continue
         assert row["cost"] is None
         assert row["allowed"] is False
@@ -454,6 +460,7 @@ def test_carrying_an_inferred_portage_pays_ground_and_reprices_with_the_switch(r
             continue
         ground = 10 if row["staying"] else 3
         assert row["cost"] == row["length"] * ground * 4
+        assert row["route"]["land"] == row["length"] * ground
         assert row["route"]["cost"] == row["cost"]
         assert row["cut"]["cost"] == row["cost"] / 2
         assert row["allowed"] is True
@@ -467,6 +474,7 @@ def test_ordinary_bridges_keep_their_prices_and_walking_access(readings):
         if row["kind"] != "bridge":
             continue
         assert row["cost"] == row["length"] * 1.3 * (4 if row["mode"] else 1)
+        assert row["route"]["land"] == (row["length"] * 1.3 if row["mode"] else 0)
         assert row["allowed"] is True
         assert row["route"]["edges"] == [0]
         assert row["line"] is None
@@ -475,6 +483,7 @@ def test_ordinary_bridges_keep_their_prices_and_walking_access(readings):
 def test_a_portage_counts_undrawn_ground_and_protection_without_source_or_marking(readings):
     tally = readings["tallies"]["portage"]
     assert tally == readings["tallies"]["bridge"]
+    assert tally == readings["tallies"]["launch"]
     assert tally["undrawn"] == readings["forward"]["cost"]
     assert tally["protected"] == {"reserve": tally["undrawn"]}
     assert tally["sources"] == {}
@@ -487,7 +496,7 @@ def test_water_wins_before_price_in_both_searches(readings):
     assert readings["waterWorth"]
     assert readings["waterJoined"]["over"]["edges"] == [0, 1]
     assert readings["groundConnectors"]["over"]["edges"] == [0, 1]
-    assert readings["groundPrimary"] == pytest.approx(20)
+    assert readings["groundPrimary"] == pytest.approx(20 * 3)
     assert readings["allWaterPrimary"] == 0
 
 
@@ -498,9 +507,9 @@ def test_a_land_point_is_reached_and_walking_keeps_its_shortcut(readings):
     assert all(route["edges"] == [2] for route in readings["walkShortcut"])
 
 
-def test_land_metres_win_before_the_path_discount(readings):
-    assert readings["lessLand"]["edges"] == [2]
-    assert readings["lessLand"]["land"] == pytest.approx(100)
+def test_land_price_keeps_the_longer_path(readings):
+    assert readings["lessLand"]["edges"] == [0, 1]
+    assert readings["lessLand"]["land"] == pytest.approx(2 * (50**2 + 50**2) ** 0.5)
     assert readings["landTie"]["edges"] == [1]
 
 
@@ -540,7 +549,7 @@ def test_seeded_joined_search_matches_the_unpruned_reference(readings):
     for case in readings["differential"]:
         for component in ("land", "cost"):
             actual, expected = case["actual"][component], case["expected"][component]
-            assert actual == pytest.approx(expected, abs=1e-8, rel=1e-12), (case["terrain"], case["pair"], component, case)
+            assert actual == pytest.approx(expected, abs=1e-8, rel=1e-12), (case["terrain"], case["pair"], case["staying"], component, case)
 
 
 def test_uniform_squares_preserve_scalar_midpoint_prices(readings):
@@ -572,3 +581,12 @@ def test_page_dam_disc_uses_the_decided_radius():
     result = subprocess.run([node, "-"], input=script, text=True, capture_output=True, timeout=10)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == [True] * 4 + [False] * 4
+
+
+def test_launches_keep_path_price_in_both_objectives_and_switch_settings(readings):
+    for row in readings["inferred"]:
+        if row["kind"] != "launch" or not row["mode"]:
+            continue
+        assert row["cost"] == row["length"]
+        assert row["route"]["land"] == row["length"]
+        assert row["allowed"] is True

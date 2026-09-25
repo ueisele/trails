@@ -206,6 +206,7 @@ class Loaded(NamedTuple):
 
     Attributes:
         sources: The datasets the network is built from
+        access: Water and dams used to check launch ties
         municipalities: The codes they were ordered per, which the caller needs
             for anything else it draws from the same per-municipality datasets
         versions: What each source was read at, by name: the version where the
@@ -224,6 +225,7 @@ class Loaded(NamedTuple):
     municipalities: list[str]
     versions: dict[str, str | None]
     protected: gpd.GeoDataFrame
+    access: water.Access | None = None
 
 
 def zone_around(area: gpd.GeoDataFrame, distance_km: float) -> gpd.GeoDataFrame:
@@ -489,7 +491,7 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
     # same extent and cannot answer differently.
     print("\nLoading protected areas (Naturbase)...")
     protected = load_protected(params, zone)
-    return Loaded(sources=sources, municipalities=codes, versions=versions, protected=protected)
+    return Loaded(sources=sources, municipalities=codes, versions=versions, protected=protected, access=water.Access(surfaces))
 
 
 def edge_costs(sources: list[NetworkSource], params: Params) -> dict[str, dict[str, float]]:
@@ -576,6 +578,7 @@ def build(
     *,
     name: str,
     protected: gpd.GeoDataFrame,
+    access: water.Access | None = None,
 ) -> tuple[Network, pd.DataFrame]:
     """Build the network, or read back the last build of the same inputs.
 
@@ -584,6 +587,7 @@ def build(
 
     Args:
         sources: The datasets
+        access: Water and dams used to check launch ties
         masks: What the derived edge fields are decided against
         clip: Extent to cut them to
         params: What decides the build
@@ -599,7 +603,9 @@ def build(
             built in
     """
     if any(source.kind == PADDLE or source.directed for source in sources):
-        return water.build(sources, masks, clip, params, RULES, protected=protected, measure=lambda network: measure(network, params, clip))
+        return water.build(
+            sources, masks, clip, params, RULES, protected=protected, access=access, measure=lambda network: measure(network, params, clip)
+        )
     network, counts = graphs.build(
         sources, masks, clip, params, RULES, name=name, protected=protected, measure=lambda network: measure(network, params, clip)
     )

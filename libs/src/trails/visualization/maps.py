@@ -3041,6 +3041,7 @@ PLAN_SETTINGS = (
     "connectorKind",
     "paddleKind",
     "portageKind",
+    "launchKind",
     "portageFactor",
     "touchedM",
     "namedM",

@@ -147,7 +147,7 @@ from trails.routing import (
     translate_joined,
     whole_way_length,
 )
-from trails.routing.sources import PADDLE, PORTAGE
+from trails.routing.sources import LAUNCH, PADDLE, PORTAGE
 from trails.utils.geo import attach_nearest, compass_points, endpoint_bearings, thin_points
 from trails.visualization import maps
 from trails.visualization.boundary import close_for_display
@@ -1933,7 +1933,7 @@ WATER_FACTOR = 30.0
 #: At two the portage takes 222 m of mapped path in 929 m on foot, with 43 m
 #: over water. Four saves 26 m on foot but keeps only 26 m of that path; eight
 #: goes 1,831 m by water to carry 573 m. Two keeps the short way and the path.
-#: Phase 8 puts land metres first; this factor belongs to the secondary price.
+#: Phase 10 puts walking land price first; P remains only in the secondary price.
 #: The full three-leg sweep and the coordinates are in kayak-mode-decisions.md.
 PORTAGE_FACTOR = 2.0
 
@@ -2171,6 +2171,7 @@ def plan_settings(params: graphs.Params, layers: list[TrailLayer], heights: dict
         "connectorKind": BRIDGE,
         "paddleKind": PADDLE,
         "portageKind": PORTAGE,
+        "launchKind": LAUNCH,
         "portageFactor": PORTAGE_FACTOR,
         # How much of a route has to lie inside a protected area before it says
         # so. Handed over rather than spelled in the page, so that the figure
@@ -3170,7 +3171,9 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     zone = norway.zone_around(park, params.approach_km)
 
     loaded = norway.load_sources(params, zone)
-    network, _ = norway.build(loaded.sources, norway.masks_from(loaded.sources), zone, params, name=which.stem, protected=loaded.protected)
+    network, _ = norway.build(
+        loaded.sources, norway.masks_from(loaded.sources), zone, params, name=which.stem, protected=loaded.protected, access=loaded.access
+    )
     by_source = describe_norway(describe(network.chains, park, norway.SOURCE_NAMES, PLACEHOLDER_IDENTITIES))
     order, tracks = laid_out(network)
 
@@ -3762,7 +3765,9 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     print(f"  Box: {which.bounds}, {(width_km[2] - width_km[0]) / 1000:,.0f} x {(width_km[3] - width_km[1]) / 1000:,.0f} km")
 
     loaded = sweden.load_sources(params, zone)
-    network, _ = sweden.build(loaded.sources, sweden.masks_from(loaded.sources), zone, params, name=which.stem, protected=loaded.protected)
+    network, _ = sweden.build(
+        loaded.sources, sweden.masks_from(loaded.sources), zone, params, name=which.stem, protected=loaded.protected, access=loaded.access
+    )
     by_source = describe_sweden(describe(network.chains, park, sweden.SOURCE_NAMES))
     order, tracks = laid_out(network)
 

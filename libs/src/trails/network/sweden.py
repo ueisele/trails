@@ -188,6 +188,7 @@ class Loaded(NamedTuple):
 
     Attributes:
         sources: The datasets the network is built from
+        access: Water and dams used to check launch ties
         versions: What each source was read at, by name: the day the register's
             file was written, the day Lantmäteriet produced the delivery, the
             moment Overpass answered
@@ -201,6 +202,7 @@ class Loaded(NamedTuple):
     versions: dict[str, str | None]
     protected: gpd.GeoDataFrame
     winter: gpd.GeoDataFrame
+    access: water.Access | None = None
 
 
 def zone_around(area: gpd.GeoDataFrame, distance_km: float) -> gpd.GeoDataFrame:
@@ -479,7 +481,7 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
         geometry="geometry",
         crs="EPSG:4326",
     )
-    return Loaded(sources=sources, versions=versions, protected=protected, winter=winter)
+    return Loaded(sources=sources, versions=versions, protected=protected, winter=winter, access=water.Access(surfaces, dams))
 
 
 def edge_costs(sources: list[NetworkSource], params: Params) -> dict[str, dict[str, float]]:
@@ -563,6 +565,7 @@ def build(
     *,
     name: str,
     protected: gpd.GeoDataFrame,
+    access: water.Access | None = None,
 ) -> tuple[Network, pd.DataFrame]:
     """Build the network, or read back the last build of the same inputs.
 
@@ -571,6 +574,7 @@ def build(
 
     Args:
         sources: The datasets
+        access: Water and dams used to check launch ties
         masks: What the derived edge fields are decided against
         clip: Extent to cut them to, in EPSG:4326; also what the height mosaic
             is read over
@@ -582,7 +586,9 @@ def build(
         The network and the per-source chain counts
     """
     if any(source.kind == PADDLE or source.directed for source in sources):
-        return water.build(sources, masks, clip, params, RULES, protected=protected, measure=lambda network: measure(network, params, clip))
+        return water.build(
+            sources, masks, clip, params, RULES, protected=protected, access=access, measure=lambda network: measure(network, params, clip)
+        )
     network, counts = graphs.build(
         sources, masks, clip, params, RULES, name=name, protected=protected, measure=lambda network: measure(network, params, clip)
     )

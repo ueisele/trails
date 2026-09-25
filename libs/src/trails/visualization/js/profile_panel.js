@@ -4192,6 +4192,13 @@
                 // **`isFinite` and not a null check.** A route whose legs are
                 // all crossings has no walked distance and no climb, and the
                 // ascent comes back NaN rather than null.
+                // The split is the compact kayak figure; keeping the point
+                // count and climb here too would push the carry off a phone.
+                if (count > 1 && planNow.kayak && isFinite(planNow.metres)) {
+                    return (planNow.metres / 1000).toFixed(2) + ' km · ' +
+                        (planNow.water / 1000).toFixed(2) + ' km 🛶 · ' +
+                        (planNow.foot / 1000).toFixed(2) + ' km 🚶';
+                }
                 var told = count + (count === 1 ? ' point' : ' points');
                 if (count > 1 && isFinite(planNow.metres)) {
                     told += ' \u00b7 ' + (planNow.metres / 1000).toFixed(2) + ' km';
@@ -4257,6 +4264,24 @@
                 name.textContent = planning()
                     ? planSays()
                     : ((selected && selected.label) || '');
+                // The complete kayak figure can use the heading's two lines
+                // on a phone. Keep each distance with its glyph; the settled
+                // figure takes the hint's place; working and profile readings
+                // still keep their own words.
+                var splitPlan = planning() && planNow.kayak && planNow.points > 1 && !planNow.working;
+                name.style.whiteSpace = splitPlan ? 'normal' : 'nowrap';
+                summary.style.display = splitPlan && !readingNow ? 'none' : 'block';
+                if (splitPlan) {
+                    var lengths = name.textContent.split(' · ');
+                    name.textContent = '';
+                    lengths.forEach(function (words, index) {
+                        if (index) { name.appendChild(document.createTextNode(' · ')); }
+                        var length = document.createElement('span');
+                        length.style.whiteSpace = 'nowrap';
+                        length.textContent = words;
+                        name.appendChild(length);
+                    });
+                }
                 var goalShown = !!(!planning() && selected && selected.goal);
                 hide.innerHTML = planning() ? '\u2713' : goalShown ? GOAL_STRUCK : '\u00d7';
                 hide.title = planning() ? 'Finish planning' : goalShown ? 'Drop the goal' : 'Put this away';

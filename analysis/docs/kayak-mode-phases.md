@@ -40,8 +40,11 @@ never switches the mode on sees nothing change, to the byte where the drive can 
    (`lomsdal_visten.py`, the comment above it). Starting figures 1.5 and 4. The record carries
    the sweep and the two figures it settles on.
 
-   *The measured P = 2 is superseded by phase 8: land metres decide first; the old prices
-   only break ties between ways with equally few land metres.*
+   *Phase 8 superseded the measured P = 2 trade-off: land metres decide first. Uwe's
+   phase-10 decision restores "the path where there is one" under water-first by
+   minimizing land price. His revised decision makes ground follow Stay on paths:
+   3 off, 10 on. P = 2 remains only in the secondary price. The phase-10 build
+   and its measured launch spacing are recorded below.*
 4. **Canoe routes, landings and portages are researched, not assumed.** OSM has none in the
    box (§3.3: no `route=canoe`, no `portage`, no `canoe=*`, six slipways). The county
    boards and Naturkartan publish canoe trails for this area; whether any of them comes with
@@ -1212,6 +1215,284 @@ network access. Full measurements, changed stored figures and evidence paths are
 phase-9 built note of `kayak-mode-decisions.md` and `~/mockups/kayak-mode/phase9/`. These
 results close the historical stops above. No tile build, source download, shared-cache
 write, push or publication.
+
+### Phase 10 — Carry on paths, launch at road ends
+
+**Uwe's decisions, 2026-09-25, translated.** "Also with the kayak, paths are to be
+preferred. Pathless is even harder with a kayak. I would rather follow a path for
+200 m than drag 20 m over a bog. Only the last few metres are always fine."
+"Can't we leave it exactly as for walking?" Ground factor **10**, last metres up
+to **30 m**, and the compact panel figure fixed. The fixed 10 is superseded by
+his subsequent switch decision below; the 30 m and panel decisions stand.
+
+**Uwe's revised decision, 2026-09-25.** After asking what Kayak together with
+Stay on paths means: *"Sollten wir das dann nicht doch so für Kajak machen?"*
+— *"Ja"* ("Shouldn't we then do it that way for kayaking after all?" — "Yes").
+Ground follows walking's `offPath()`: **3 with Stay on paths off,
+10 with it on**. This replaces the phase brief's fixed 10. Stay on paths remains
+visible in kayak mode; the interim idea of hiding it is dropped and is not built.
+
+**Uwe's topology decision, 2026-09-25, superseding review.**
+*"Ja ich finde das tatsächlich eine Verbesserung. Lasse Codex das so machen."*
+— "Yes, I actually think that is an improvement. Let Codex do it that way."
+Launches may split walking edges. The explanation was the **55.990 → 68.341 m**
+walking case: a new entry offers about **25 m ground + 43 m road**, costing
+**132 instead of 168** under the unchanged walking rule. Walking can use the
+new junction; the launch itself remains kayak-only. This supersedes review's
+existing-nodes-only restriction, not Uwe's 3/10 switch decision.
+
+Walking differentials must match the exhaustive reference on the new graphs:
+200 pairs per map in both settings. Random-pair changes are reported as a
+distribution. Every moved recorded walking reading gets before/after figures
+and a reason. A reading stops the phase only when its length moves beyond
+max(2 %, 50 m) **and** its new way is not cheaper than the old way re-priced on
+the new graph. Longer path carries are expected in kayak; p95 is reported in
+both settings and stops only if it more than doubles.
+
+**The rule.** The primary kayak objective becomes land price: walked metres times
+the unchanged walking source factor, ground connectors and PORTAGE edges times
+`offPath()` (3 or 10), paddle and ferry edges zero. The secondary price
+stays as before, including P = 2, shore 1 and open water 1.5. No path discount or
+additional price constant. Water still wins against any positive land price.
+Walking prices remain unchanged; Uwe accepts the new walking entry nodes below.
+
+Build launch ties at walking degree-1 road/path ends within 30 m of paddle water,
+and at nearby passing roads where another tie does not already serve that shore.
+Measure and justify the proposed 100 m shore spacing. Ties run over land, avoid
+other water bodies and phase-9 dam discs, and join the shore. Uwe allows a passing-road launch to split the road at its nearest point;
+the shore is re-noded where needed. They cost factor 1 in both objectives and are unreachable and unsnappable
+on foot. A separate `Launches` source of kind `LAUNCH` keeps that price distinct
+from `PORTAGE`: the old Portage paths are inferred ground, priced by `offPath()`.
+Launches have no selectable chain and are tallied as undrawn carry. Measure
+counts, lengths, dead-end/passing origin and new access within 500 m per map.
+The compact kayak line must show the whole length and the paddle/foot split,
+matching the heading's `2.47 km 🛶 · 3.51 km 🚶` form; walking keeps its plain figure.
+
+Both switch settings must be measured for the Kloten start, phone-2, the scene
+triples and all 200 seeded kayak pairs per map: changed answers, carry/paddle
+totals, largest increases, pruned/reference equality and p95. The kayak drives
+state and restore their switch setting. A measured ground-versus-path example
+must show the switch changing the kayak route, if such a scene leg exists.
+
+**Stopped 2026-09-25 — Shared launch noding changes walking.** The existing build
+nodes every source together (`network/water.py:build`, `routing/graph.py:build_network`).
+Making a tie kayak-only does not make its road junction kayak-only. Walking's
+`joinedRoute` offers entry/exit connectors at every graph node; `snapped` also
+prefers a nearby eligible junction over a point along an edge. A split road node
+is eligible because it has walking edges, even when the launch itself is excluded.
+
+A browser diagnostic on the existing Malingsbo-Kloten page splits road edge
+45003 at **(59.897876698495, 15.288431594724)**, the nearest road foot opposite
+shore node 93159. Their metric gap is **6.443628 m**. It changes only that road
+split, first without a tie, then with a PORTAGE-kind diagnostic tie that is
+unreachable on foot. Both variants give the same walking changes:
+
+| Fixed input | Walking before → after m | Stay on paths before → after m |
+|---|---:|---:|
+| East of launch → phone-2 junction | 55.990099 → 68.341328 | 55.990099 → 68.341328 |
+| Phone-2 1→2 | 175.288968 → 175.288968 | 175.288968 → 175.288968 |
+| Phone-2 2→3, snapped in walking | 43.164309 → 43.153989 | 43.164309 → 43.153989 |
+
+The first input is **(59.897876698495, 15.288881594724) →
+(59.897507, 15.288204)**. Its start remains off-network at the investigation's
+7.188 m snap reach. The new answer uses **25.187339 m** of ground and
+**43.153989 m** of the road, with no launch edge. Ordinary walking's price falls
+**167.970298 → 131.662202**; Stay on paths falls **559.900994 → 307.973575**.
+The phone-2 2→3 change is a snap to the new road node instead of its former
+partial-edge point. All **12** before/after labels in the tie variant match the
+unpruned reference. This is a change in available walking ways and snaps, not
+a pruning defect or a price change.
+
+**Topology question at the first stop, resolved by review below.** Retaining byte-identical walking
+requires preserving the pre-launch walking entry set, snapping and edge geometry
+while exposing the new junctions to kayak routing. Merely excluding the launch
+kind, or hiding its nodes from snapping, does not do that. The alternative is to
+accept and measure walking changes from shared noding, which the phase currently
+forbids. The recommendation is to retain the walking invariant and explicitly
+include mode-specific routing topology; it is not a decision attributed to Uwe.
+
+**Build status at the first stop, 2026-09-25.** Records only; phase 10 is not built. The diagnostic
+is an in-memory split of an existing page, not a generated launch catalogue or
+a validated production tie. No production prices, topology, panel or drive
+figures have changed. Graph/map builds, per-map launch measurements, the full
+reader/600-pair comparison, walking differentials, p95 timing, twice-green
+selected drives and `command make drive-all` remain pending this stop. Scratch:
+`~/mockups/kayak-mode/phase10/`, particularly `noding-summary.json`, `noding.js`
+and `noding-with-tie.json`. Each browser harness is capped at 8 GiB, runs alone
+and restores borrowed modes; no goal or saved plan is changed. No cache write,
+source download, tile build, push or publication.
+
+**Validation of this stop.** `command make hooks-run` is green with network
+access: ruff format/check, mypy, tests and the standard repository hooks.
+Log: `~/mockups/kayak-mode/phase10/hooks.log`. This checks the unchanged
+production implementation and the records; it does not complete phase 10.
+
+**Review decision after the stop, 2026-09-25 — Existing walking nodes only.**
+Walking stays byte-identical. Dead ends already have nodes. A passing road uses
+an existing walking node within 30 m of water; if none exists there, that place
+gets no launch. No walking edge is split for a launch. Compare the lost passing
+locations with the splitting prototype, and check phone-2 and the Kloten northern
+shore first. If they do not get a launch this way, stop with the figures for Uwe
+to decide whether walking may change. This is review's topology decision,
+separate from Uwe's switch-price decision.
+
+**Measured after review, 2026-09-25 — No launch at the original short landing.**
+The nearest existing walking node to both original landings is road junction
+**33831**, phone-2's point 2. It is **42.075943 m** from unsimplified source
+water, outside 30 m. The next junction, **33832**, is **50.845958 m** away.
+Neither is a degree-1 road end. The splitting diagnostic's road foot at
+**(59.897876698495, 15.288431594724)** therefore cannot be retained as a launch
+start. There was **one** investigated splitting site: **one original location
+lost**, at the southern tip of Sågviken, shared by the phone-2 and Kloten
+northern-shore examples. This is the comparison with that diagnostic, not a
+map-wide launch count; no three-map splitting catalogue was built.
+
+There is a **farther alternative on the same road**, which must not be reported
+as an absence of all access to the bay. Existing junction **24433** at
+**(59.899237772676, 15.289714526724)** is **19.968740 m** from source water and
+**20.368276 m** from the simplified paddle shore. Its nearest existing shore
+node is **93164**, displayed at **(59.899302, 15.289356)**. The encoded-node tie
+is **21.320689 browser metres** (**21.312238 m** in EPSG:3006), intersects
+**0 m** of cached unsimplified water and is over 4.4 km from the nearest dam
+centre. No edge split or new node is needed for this alternative. It lands
+**191.706571 browser metres along Shore** from phone-2's point 3. Thus the
+original location is lost, while this road still has one confirmed farther
+candidate; these are different counts.
+
+A browser-only experiment adds that tie at factor 1 in both objectives and
+uses the newly decided `offPath()` primary. The existing page, prices and graph
+are restored afterwards. Figures below are physical carry/paddle lengths using
+the router's connector samples, not the profile's finer displayed split.
+
+| Pair | Before, carry / paddle m, either switch | New rule + farther tie, switch off | New rule + farther tie, switch on |
+|---|---:|---:|---:|
+| Kloten P1 → northern shore | 231.408 / 0 | 411.031 / 620.694 | 411.031 / 620.694 |
+| Kloten P1 → P2 proxy | 411.031 / 7,088.969 | 411.031 / 7,088.969 | 411.031 / 7,088.969 |
+| Off-road start → P2 proxy | 196.753 / 6,920.200 | 399.583 / 7,088.969 | 399.583 / 7,088.969 |
+| Phone-2 1→2 | 173.877 / 0 | 175.289 / 0 | 175.289 / 0 |
+| Phone-2 2→3 | 43.272 / 0 | 43.272 / 0 | 233.680 / 191.707 |
+
+Phone-2's 1→2 follows the road in **both** switch settings. Its 2→3 supplies
+a measured switch-sensitive example with the farther tie: off, the straight
+connector has land price **129.814548** and wins; on, its price is
+**432.715161**, so the road and launch at **297.388133** win. The carried
+233.680 m includes the 21.321 m tie. The Kloten P1 routes and off-road start
+still leave on the west; none uses this tie. For P1, the known road way via
+the farther tie has land price **525.263792**, against the western way's
+**482.156276**. The unchanged walking factors, not a failed connection, choose
+the west. All **30** local labels match the unpruned reference within `1e-8`.
+
+**Stopped at the requested landing check.** There is no qualifying existing
+walking node at the original short-launch location. The farther tie is a real
+alternative and helps phone-2 with Stay on paths, but does not change the
+Kloten P1 departures. These figures are returned to Uwe to decide whether to
+accept that relocated access or allow walking noding to change for the short
+launch. The earlier topology question is resolved by review's existing-node
+rule; no separate walking graph is proposed at this stop.
+
+**Build status at the landing stop.** Records and scratch diagnostics only. The revised switch
+rule and launch rule are not implemented in production. The three-map launch
+catalogue, counts and spacing, full reader comparisons, both-setting seeded
+kayak differentials and p95, walking-invariance checks, graph/map builds,
+selected drives and `drive-all` remain pending. No panel figure or drive
+snapshot changes. Evidence is under `~/mockups/kayak-mode/phase10/existing-nodes/`,
+especially `audit.json`, `route-summary.json` and `routes-checked.json`.
+
+**Validation of the landing stop.** `command make hooks-run` is green with
+network access: ruff format/check, mypy, tests and the standard hooks. Log:
+`~/mockups/kayak-mode/phase10/existing-nodes/hooks.log`. This validates the
+records and unchanged production tree, not the unbuilt phase-10 changes.
+
+**Built 2026-09-25 — Carry on paths, launch at road ends.** The primary
+kayak label is now walking land price, with `offPath()` at 3 / 10 and zero
+for paddle and ferry edges. P = 2 remains only in the secondary price.
+Stay on paths stays visible. `Launches`, a separate `LAUNCH` kind, costs 1
+in both labels; `PORTAGE` keeps its ground price. Walking cannot use or snap
+to a launch, but can use the new road junctions Uwe accepted.
+
+Launches use degree-1 walking ends and the nearest points of passing paths,
+within 30 m of the shore. They reject source-water crossings and the existing
+25 m dam discs. Projected endpoints are joined explicitly within the existing
+centimetre noding tolerance, including to full path geometry: floating-point
+overlay alone can leave a shortest-line endpoint disconnected. All retained
+ties were audited from a walking node through launch edges to paddle shore.
+
+The measured **100 m** shore spacing is retained. Across the three maps,
+50 / 100 / 200 m produce **6,133 / 4,395 / 3,111 ties** and
+**1,987 / 1,464 / 1,058 new access points**. The 100 m catalogue has 28% fewer
+ties than 50 m and 74% as many new access points; 200 m reduces new access by
+another 28%. These are separate catalogue counts, since candidate subdivision
+follows the spacing. Distance is along the bank, with dead ends kept first;
+existing road/shore junctions also occupy the bank. This spacing is an
+implementation choice justified by the sweep, separate from Uwe's price and
+topology decisions.
+
+| Map | Launch ties | Dead ends / passing | New access within 500 m | Length min / median / p95 / max m |
+|---|---:|---:|---:|---:|
+| Malingsbo-Kloten | 2,220 | 269 / 1,951 | 808 | 0.059 / 12.514 / 27.792 / 29.997 |
+| Abisko | 350 | 21 / 329 | 162 | 0.137 / 13.376 / 26.825 / 29.973 |
+| Lomsdal-Visten | 1,825 | 404 / 1,421 | 494 | 0.013 / 11.167 / 27.601 / 29.973 |
+
+New access means that the old land network, including inferred portages,
+could not reach the same undirected paddle component within 500 m. It
+excludes off-network connectors; it is not an upstream reachability claim.
+
+The original short Kloten landing is now a **passing-road launch**: walking
+node **141123**, **6.085713 m** from source water, joins shore node **94456**
+over **6.413967 m** (**6.405672 browser metres**). Both phone-2's 2→3 and
+P1→northern shore use it in both settings. Phone-2's 1→2 follows **175.289 m
+of road** with the switch either off or on. Its 2→3 is **43.178 m road +
+6.406 m launch**. P1→northern shore becomes **224.873 m carry + 28.514 m
+paddle**. The nearby measured switch example trades **88.881 → 14.913 m**
+of straight ground for **52.325 → 300.100 m** of road.
+
+The compact kayak line now says the whole length and the split, in the
+heading's form, for example `7.50 km · 7.10 km 🛶 · 0.40 km 🚶`. It wraps
+between complete distance chunks on a phone. Walking keeps its plain figure.
+The old shortest-carry drive is renamed `a_carry_uses_walking_prices`; the new
+readings cover road launches, the switch-sensitive carry and the full compact
+line. Each reading states and restores its switch setting and borrowed page
+state.
+
+The [phase-10 measurements](kayak-mode-phase10-measurements.md) contain both
+settings of every scene triple, the Kloten starts, phone-2, the phase-2 sweep,
+Korslångssmedja, all seeded-pair totals and distributions, the largest increases,
+and every moved recorded walking way with its old-way price comparison.
+
+All **1,200 kayak** and **1,200 walking** comparisons match the exhaustive
+reference: 200 pairs per map in both settings. All **264 frozen recorded
+walking readings** pass the old-way price gate; **103** change when rounded
+to three decimals and are listed in the measurements. The two beyond the
+distance threshold are cheaper under the unchanged rule. The additional
+fixed reader legs pass that gate too. Walking random-pair changes are
+reported as distributions, without a stop gate.
+
+| Map | Kayak p95 ms, switch off, before → after | Switch on, before → after |
+|---|---:|---:|
+| Malingsbo-Kloten | 1,637.55 → 2,155.05 | 1,678.40 → 2,015.00 |
+| Abisko | 239.60 → 347.30 | 235.30 → 357.55 |
+| Lomsdal-Visten | 2,771.40 → 3,474.50 | 2,872.35 → 3,366.35 |
+
+No p95 more than doubles. The largest carry increase is **36,995.003 m**
+on Norway pair 198 with Stay on paths on, **41,946.522 → 78,941.525 m**.
+Longer path carries are Uwe's accepted choice; the complete carry, paddle and
+ferry totals and the largest whole-route increases are reported separately.
+
+**Drive.** The selected readings are green twice per page: **310 / 210 / 214**
+readings per run. The complete `command make drive-all` run is also green:
+**1,708 / 1,634 / 1,641** readings, **4,983** in all, with no broken invariants,
+moved figures, unrecorded figures or undeclared skips. Full-suite review
+updated the dry-profile sample-count hashes, the renumbered long-road tap
+fixture and the measured scene figures, with their before/after values in
+the measurement record. The existing gates and tolerances stand.
+
+**Validation.** `command make hooks-run` is green with network access:
+ruff format/check, mypy, both pytest suites and the standard hooks. The
+measurement record explains the corrected type annotations and scratch-harness
+failures as well as the full-drive snapshot updates. All graph and map builds
+ran one at a time with an 8 GiB address-space cap, using cached inputs. No tile
+build, push or publish was made. Phase 10 is complete; no further decision is
+required and no later phase is started.
 
 ## 5. Not in this plan
 

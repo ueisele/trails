@@ -22,6 +22,9 @@ PADDLE = "paddle"
 #: Inferred ground a kayak is carried over, never a way for walking modes.
 PORTAGE = "portage"
 
+#: The last metres from a path to the shore, carried at path price in a kayak.
+LAUNCH = "launch"
+
 #: A connector inferred between two loose ends that lie close together. It has no
 #: chain, because no source ever drew it.
 BRIDGE = "bridge"
@@ -38,7 +41,7 @@ class NetworkSource:
         cost_factor: Multiplies an edge's length to give its cost, so a route
             prefers a better-surveyed line where the detour is small. Keep close
             to 1.0: a large factor buys real detours.
-        kind: :data:`PATH`, :data:`FERRY`, :data:`PADDLE`, :data:`PORTAGE` or :data:`BRIDGE`.
+        kind: :data:`PATH`, :data:`FERRY`, :data:`PADDLE`, :data:`PORTAGE`, :data:`LAUNCH` or :data:`BRIDGE`.
         directed: Whether travel follows only the digitised direction of each line.
         identity_field: Column saying that two lines are the same named or
             registered way — a road id, a route name. Several identities in one

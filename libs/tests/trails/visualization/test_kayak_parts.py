@@ -172,3 +172,24 @@ def test_dam_samples_change_the_kayak_tally_only(parts):
     assert parts["walkDam"] == parts["walkLake"]
     assert all(part["kind"] == "land" for part in parts["kayakDam"])
     assert sum(part["length"] for part in parts["kayakDam"]) == 20
+
+
+def test_compact_kayak_figure_includes_water_and_walking_keeps_its_words():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is needed to execute the compact figure")
+    source = files("trails.visualization").joinpath("js", "profile_panel.js").read_text()
+    function = re.search(r"^            function planSays\(\) \{.*?^            \}", source, re.M | re.S)
+    assert function is not None
+    script = (
+        function[0]
+        + """
+        let planNow = {points:5, metres:7500, water:7100, foot:400, kayak:true, ascent:6};
+        const kayak = planSays();
+        planNow = {points:5, metres:400, water:0, foot:400, kayak:false, ascent:6};
+        console.log(JSON.stringify({kayak, walking:planSays()}));
+    """
+    )
+    got = json.loads(subprocess.run([node, "-e", script], check=True, capture_output=True, text=True).stdout)
+    assert got["kayak"] == "7.50 km · 7.10 km 🛶 · 0.40 km 🚶"
+    assert got["walking"] == "5 points · 0.40 km · +6 m"

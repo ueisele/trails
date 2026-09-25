@@ -564,7 +564,9 @@ def graph_norway(which: Park, args: argparse.Namespace, country: Country, repo_r
     zone = norway.zone_around(park, params.approach_km)
     loaded = norway.load_sources(params, zone)
     landmarks = load_norwegian_landmarks(params, loaded.municipalities, zone, which.gateway)
-    network, chains = norway.build(loaded.sources, norway.masks_from(loaded.sources), zone, params, name=which.stem, protected=loaded.protected)
+    network, chains = norway.build(
+        loaded.sources, norway.masks_from(loaded.sources), zone, params, name=which.stem, protected=loaded.protected, access=loaded.access
+    )
     return Graphed(
         network,
         chains,
@@ -609,7 +611,9 @@ def graph_sweden(which: Park, args: argparse.Namespace, country: Country) -> Gra
     zone = gpd.GeoDataFrame(geometry=[box(*which.bounds)], crs="EPSG:4326")
     loaded = sweden.load_sources(params, zone)
     landmarks = load_swedish_landmarks(params, zone, which.gateway)
-    network, chains = sweden.build(loaded.sources, sweden.masks_from(loaded.sources), zone, params, name=which.stem, protected=loaded.protected)
+    network, chains = sweden.build(
+        loaded.sources, sweden.masks_from(loaded.sources), zone, params, name=which.stem, protected=loaded.protected, access=loaded.access
+    )
     return Graphed(
         network,
         chains,

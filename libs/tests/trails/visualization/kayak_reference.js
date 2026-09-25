@@ -3,7 +3,7 @@ function referenceConnectorPrice(graph, aLon, aLat, bLon, bLat) {
     const length = panel().metresBetween(aLon, aLat, bLon, bLat);
     const ground = offPath() * (kayak() ? PLAN.portageFactor : 1);
     const waterPrice = kayak() ? openWaterFactor(graph) : PLAN.waterFactor;
-    if (!graph.water || (!kayak() && !(waterPrice > ground))) return {cost: length * ground, land: kayak() ? length : 0};
+    if (!graph.water || (!kayak() && !(waterPrice > ground))) return {cost: length * ground, land: kayak() ? length * offPath() : 0};
     const pieces = Math.max(1, Math.ceil(length / graph.water.cellM));
     let wet = 0;
     for (let i = 0; i < pieces; i++) {
@@ -12,7 +12,7 @@ function referenceConnectorPrice(graph, aLon, aLat, bLon, bLat) {
         if (graph.waterAt(lon, lat) && !(kayak() && graph.damAt && graph.damAt(lon, lat))) wet++;
     }
     const water = length * wet / pieces;
-    return {cost: (length - water) * ground + water * waterPrice, land: kayak() ? length * (pieces - wet) / pieces : 0};
+    return {cost: (length - water) * ground + water * waterPrice, land: kayak() ? length * (pieces - wet) / pieces * offPath() : 0};
 }
 // Eager exit prices, an exhaustive reverse Dijkstra, then a separate exhaustive
 // entry scan. No direct-way ceiling, dry floor or incumbent cuts off work.
