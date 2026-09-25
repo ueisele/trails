@@ -1551,7 +1551,7 @@ entry, the drawn connector, panel split and export. Update moved scene
 figures with a phase-11 note; selected kayak/entry checks must pass twice
 per rebuilt page, then `command make drive-all` once. No graph or tile build.
 
-**Stopped 2026-09-25 — the prototype exceeds the speed gate.** On Abisko's
+**First prototype, stopped 2026-09-25 — history.** On Abisko's
 unchanged 200 phase-10 pairs in kayak mode with Stay on paths off, warm
 Firefox p95 changes **334.05 → 1,084.15 ms**, **3.245×**, above the permitted
 2×. Median changes **34.5 → 237.5 ms**, worst **510 → 1,707 ms**. Baseline
@@ -1572,13 +1572,48 @@ sample, complete reference comparisons, pinned tests, builds and drives
 are pending the failed speed gate. No scene figure changed. The
 [phase-11 measurements](kayak-mode-phase11-measurements.md) give the timing
 method, Norway profile, restoration behaviour and precise remaining work.
-Review must address candidate-search performance before resuming phase 11;
-the decided entry rule and speed gate have not been changed.
+Review subsequently requested lazy candidate discovery, keeping the entry
+rule and speed gate unchanged; that attempt is recorded below.
 
 **Validation of the stop.** `command make hooks-run` is green with network
 access: ruff format/check, mypy, both pytest suites and the standard hooks.
 This validates the restored production tree and records, not the prototype.
 Log: `~/mockups/kayak-mode/phase11/hooks.log`.
+
+**Review's follow-up, 2026-09-25.** Generate entries as their permitted end
+nodes settle; reject whole edges by a bounding-box floor before expanding
+segments. Queue exits lazily by edge-box floors, preserving every seed that
+can win. Check same-edge ways locally, restore a whole-network dry-box entry
+floor, and permit walking midpoint batching only after equal wet counts and
+unchanged answers are demonstrated. Measure Abisko kayak first, then stop
+again with a profile if the unchanged gate fails.
+
+**Second prototype, stopped 2026-09-25 — lazy discovery still exceeds the
+gate.** Abisko kayak, the same 200 phase-10 pairs: p95 **338.30 → 1,671.20 ms**,
+**4.940×**; median **33 → 294.5 ms**; worst **526 → 2,461 ms**. The prototype
+caches geometry and an edge-box hierarchy in the router, uses sparse query
+caches, defers exit expansion through the floors queue, and tests incident
+entries at settled nodes. Its common entry floor includes segment interiors
+and the dry box's midpoint-sampling allowance. The prototype also checks a
+matching entry when an exit expands, because a winning interior-to-interior
+route need not reach either real endpoint. This scheduling choice can
+expand source candidates before any real node settles.
+
+On each of the five slowest pairs, the lazy queue nevertheless expands all
+**105,690** usable edges. Pair 78 expands **151,385 segments on each side**,
+with **300,513 connector calls**. Its instrumented total is **3,123 ms**:
+**2,113 ms** inside exit expansion, including **1,354 ms** in same-edge checks;
+connector pricing across the search takes **1,812 ms**. These nested times
+overlap. The weak box floors leave the full network eligible; deferring the
+work has not eliminated it. The [measurements](kayak-mode-phase11-measurements.md#lazy-prototype-follow-up)
+give the bounds and all five profiles.
+
+**Build status after the second stop.** Not built. Production source and
+tests remain unchanged. The frozen lazy prototype and evidence are under
+`~/mockups/kayak-mode/phase11/lazy/`. The remaining timing cells, second
+sample, reference comparisons, walking midpoint-count audit, regressions,
+builds and drives were not started past the failed first gate. No candidate,
+price or gate decision is changed; candidate discovery still needs work.
 
 ## 5. Not in this plan
 

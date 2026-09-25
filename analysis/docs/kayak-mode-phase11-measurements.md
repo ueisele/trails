@@ -1,9 +1,11 @@
 # Phase 11 measurements
 
-**Stopped at the speed gate, 2026-09-25. Phase 11 is not built.** The
-prototype improves the Kloten entries, but Abisko kayak p95 rises by
-3.245×. Production source and tests are restored; these measurements
-describe a browser prototype, not the shipped planner.
+**Stopped again at the speed gate, 2026-09-25. Phase 11 is not built.** The
+first prototype improves the Kloten entries but raises Abisko kayak p95
+by 3.245×. Review's lazy follow-up raises it by 4.940×; its evidence is
+[below](#lazy-prototype-follow-up). Production source and tests are
+unchanged. These measurements describe browser prototypes, not the
+shipped planner. The first stop remains history in the following sections.
 
 ## Kloten
 
@@ -161,3 +163,135 @@ The Abisko page SHA-256 is
 `ae6a144eaf7ba9abf8c9d3ff055f6b389895711ded96a092141ed9c96aadcfda`.
 The proposed script SHA-256 is
 `d2091066bedf7fb929d39e69f643436bd6d5677f2be6d144f0f0c242e3f1554e`.
+
+## Lazy prototype follow-up
+
+Review, 2026-09-25, keeps the candidate set, objective and speed gate, but
+requests lazy discovery. Entries belong to incident edges at settled
+nodes; exits belong to a floor-ordered spatial queue. Whole-edge and
+candidate floors precede segment expansion and exact connector pricing.
+Sparse query caches replace arrays sized by the graph, and a whole-network
+dry-box bound replaces the first prototype's constant zero entry bound.
+Walking batching remains conditional on equal per-connector midpoint wet
+counts, floating-point-only price differences and unchanged routes.
+
+The second prototype caches an edge bounding-box hierarchy and cumulative
+geometry lengths in the router. Each query traverses that hierarchy through
+the existing floors queue, expanding segments only at eligible leaves.
+Incident entries are generated when their permitted end node settles.
+There is no unconditional per-query loop over every edge or segment.
+
+A route between two interior points may beat the direct connector without
+reaching either real endpoint. At an expanded exit edge the prototype
+therefore also offers matching source candidates, subject to a whole-edge
+floor for both connectors. The same-edge sweep is restricted to that edge;
+its candidates and exact connector prices share the query caches. This
+handles interior routes that real-node settlement alone would miss. It
+also expands source candidates before a real node settles, and is expensive
+in this prototype when the floors leave distant edges eligible. This
+particular scheduling choice is not established as necessary or efficient.
+
+For the common entry floor, let `D` be a lower bound on distance to the
+nearest eligible segment and `B` a lower bound on distance to the dry box's
+boundary. The hierarchy finds `D` using conservative coordinate scales.
+A connector contained in the box costs at least `D × offPath()` in land;
+a connector leaving it has dry midpoint samples covering at least
+`max(0, B − cellM)` metres. Thus
+`min(D, max(0, B − cellM)) × offPath()` bounds both cases. A whole sample's
+allowance makes this conservative with the unchanged 25 m midpoint grid.
+This is a derived bound, not a constant zero; it can still evaluate to zero
+when the known dry box is short.
+
+### First cell: failed
+
+The same frozen 200 Abisko kayak phase-10 pairs, same alternating
+baseline/prototype method, Firefox version, page and 8 GiB cap as above.
+The first four pairs warm both variants, including the cached hierarchy;
+query timings include lazy discovery and pricing. No other heavy process
+runs alongside the browser. The harness restores mode, path switch and
+goal way and verifies the restoration.
+
+| Map / setting / sample | Pairs | Median ms before → after | p95 ms before → after | Worst ms before → after |
+|---|---:|---:|---:|---:|
+| Abisko / kayak / phase 10 | 200 | 33 → 294.5 | 338.30 → 1,671.20 | 526 → 2,461 |
+
+The ratio is **4.939994**, above the unchanged 2× gate. No browser errors.
+No proposed label is worse than its old label within 10⁻⁸, which does not
+prove equality to the new reference. These are search measurements only:
+drawing and export have not been adapted or validated for this prototype.
+The original phase-10 pair files are unchanged.
+
+### Where the lazy search spends its time
+
+After the failed cell, the five slowest pairs were profiled in a separate
+browser run, with the hierarchy warmed. Function timers add overhead;
+these totals are diagnostic, not substitute gate timings. Times inside
+nested functions overlap and must not be summed.
+
+| Pair | Gate baseline → lazy ms | Profile total ms | Connector calls | Connector ms | Exit expansion ms | Same-edge ms | Candidate generation/cache access ms |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 78 | 526 → 2,461 | 3,123 | 300,513 | 1,812 | 2,113 | 1,354 | 521 |
+| 18 | 500 → 2,212 | 3,178 | 343,190 | 1,792 | 1,800 | 1,233 | 493 |
+| 58 | 457 → 1,987 | 2,779 | 236,628 | 1,448 | 1,749 | 1,201 | 484 |
+| 194 | 338 → 1,935 | 2,770 | 366,125 | 1,424 | 1,839 | 1,172 | 481 |
+| 134 | 306 → 1,912 | 2,594 | 299,929 | 1,345 | 1,786 | 1,225 | 470 |
+
+All five expand **105,690 edges on each side**, all eligible edges in the
+hierarchy. Pair 78 visits **211,379 hierarchy entries**, expands
+**151,385 segments on each side**, and generates **43,144 entry candidates**
+and **43,050 exit candidates**. Its **39,987 exact queue pops** lead to
+**29,053 calls** to each entry function. Testing node entries takes **92 ms**;
+testing incident-edge entries takes **216 ms**. Exit expansion and the
+same-edge checks dominate the added work, with connector pricing accounting
+for **58.02%** of the instrumented whole search.
+
+A separate bound reading on pair 78 explains why the queue reaches every
+leaf. The source's known dry-box boundary is only **4.864004 m** away, so
+the derived common entry floor is **0** with the 25 m sampling allowance.
+The target boundary is **185.854663 m** away, capping every exit-box land
+floor at **482.563990**. The initial incumbent has **95,056.790774** land
+price; even the eventual winning **27,740.071069** remains far above that
+cap. Deferring these eligible leaves merely postpones a full expansion;
+the box floors do not exclude them. No inference that the candidate set
+itself cannot meet the gate follows from this implementation.
+
+### Second stop and remaining work
+
+The speed gate requires stopping here. Production source and tests were
+never replaced by this prototype. No maps, graphs or tiles were built,
+and no shared cache contents were changed. The first prototype's local
+Kloten figures above have not been re-established for the lazy variant.
+
+The remaining eleven original-sample cells, the entire second off-network
+sample, 2,400 reference comparisons, Kloten attached/off-network regressions,
+walking midpoint-count/price/route audit, display and export checks, builds
+and drives remain unrun. The walking batching code is retained only in
+scratch; no claim of equal wet counts, a maximum price difference, or a
+walking speed improvement is made. Stored-plan behaviour remains unchanged,
+as described above. No scene figures move and no built note is warranted.
+Review must address the cost of eligible exit and same-edge expansions;
+the candidate set, objective and speed gate remain the accepted decisions.
+
+Evidence under `~/mockups/kayak-mode/phase11/lazy/`:
+
+- `helpers.js`, `integrate.py`, `plan_mode.js`: the frozen lazy prototype
+  and its construction from the recorded production source.
+- `benchmark.py`, `benchmark-abisko.log`, `benchmark-abisko-kayak.jsonl`,
+  `benchmark-abisko-kayak-summary.json`, `speed-summary.json`: all 200
+  before/after timings and labels, hashes and gate calculation.
+- `profile.py`, `profile-abisko.log`, `profile-abisko-kayak.jsonl`: the
+  five instrumented slowest pairs and their candidate/queue counts.
+- `bounds.py`, `bounds-abisko.log`, `bounds-abisko-kayak.jsonl`: the
+  separate pair-78 dry-box and incumbent reading.
+
+The lazy script SHA-256 is
+`1533dd512987f00ae19245e24cf0cc2c19e793b19ecac5e9639fca00d090f645`.
+The original Abisko page hash remains the one recorded above.
+
+**Validation of the second stop.** `command make hooks-run` is green with
+network access and the shared-cache guard: ruff format/check, mypy, both
+test suites and the standard hooks. Log: `lazy/hooks-rerun.log`. The first
+invocation passed 2,040 library and 97 pipeline tests, but pre-commit marked
+the hook unsuccessful because the records were edited during that run.
+The fixed-file rerun passes. These checks validate the unchanged production
+tree and the records; they do not validate the scratch prototype.

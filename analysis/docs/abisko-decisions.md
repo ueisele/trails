@@ -2904,8 +2904,11 @@ the [kayak phase-11 entry rule](kayak-mode-phases.md#phase-11--enter-an-edge-in-
 to both walking settings: an off-network point may join a segment interior,
 priced by the unchanged walking objective. This is review's decision,
 separate from Uwe's request for the kayak entries. The first prototype
-stops on Abisko's kayak p95 gate, 334.05 → 1,084.15 ms. Walking source and
-restoration remain unchanged; its comparisons and drives are pending.
+stops on Abisko's kayak p95 gate, 334.05 → 1,084.15 ms. Review's lazy
+follow-up also stops, at 338.30 → 1,671.20 ms: its five slowest pairs still
+expand all 105,690 usable edges. See the [phase-11 measurements](kayak-mode-phase11-measurements.md#lazy-prototype-follow-up).
+Walking source and restoration remain unchanged; its comparisons,
+per-connector wet-count audit and drives are pending the speed gate.
 
 ---
 

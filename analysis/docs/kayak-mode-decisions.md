@@ -102,7 +102,7 @@ would draw it without a change.
 
 ## 5. Changes
 
-- 2026-09-25 — phase 11 stops at its speed gate: the interior-entry prototype reproduces all 24 distinct off-network Kloten answers, but Abisko kayak p95 rises 334.05 → 1,084.15 ms (3.245×). Uwe asks for entries before offsets; review applies them to both walking settings. Production source and tests are restored, with the prototype and evidence in scratch. The stop note and measurements are below.
+- 2026-09-25 — phase 11 stops again after review requests lazy candidate discovery: Abisko kayak p95 rises 338.30 → 1,671.20 ms (4.940×). All 105,690 usable edges still expand on the five slowest pairs. The first prototype's 3.245× stop remains history below. Uwe's entry request, review's walking scope, the candidate set and speed gate stand; only records change, with both prototypes in scratch.
 
 - 2026-09-25 — phase 10 is built: kayak land price follows walking, ground follows Stay on paths at 3 / 10, and 4,395 path-priced launches join nearby roads to shore. Uwe accepts the shared road noding. The compact line counts the whole way with its split. All 2,400 kayak/walking labels match in both settings; the largest kayak p95 increase is 52%. The measurements and build note are below.
 
@@ -185,7 +185,7 @@ kayak dam discs. The dry optimum may miss a slightly better point when its
 connector crosses water. Exits mirror entries, including two middle points
 on one edge. The full rule and required drive are in the plan's phase 11.
 
-**Stopped at the speed gate.** All 24 distinct Kloten off-network rows choose
+**First prototype's speed stop — history.** All 24 distinct Kloten off-network rows choose
 the northern launch in the prototype. E8/off to Q carries **231.360461 m**
 at **313.813413 land price**, against 308.226 m and 427.899423 before. The
 largest differences from the virtual table are **0.000029 m carry**,
@@ -211,15 +211,38 @@ reference draft are retained in `~/mockups/kayak-mode/phase11/`. The
 available figure and identifies the remaining 11 original-sample timing
 cells, all second-sample work, differentials, attached regressions, display
 and export checks, builds and drives as pending. No scene figure, shared
-cache, graph or tile changed. No push or publication. Review must address
-candidate-search performance before phase 11 resumes; no decision on
-prices, walking scope or the retained speed gate is reopened.
+cache, graph or tile changed. No push or publication. Review then requests
+lazy discovery, keeping prices, walking scope and the speed gate unchanged.
 
 **Validation of the stop.** `command make hooks-run` passes with network
 access, including ruff format/check, mypy, both pytest suites and the
 standard hooks. A filesystem guard protects the shared cache. This checks
 the restored production tree and records, not the rejected prototype.
 Log: `~/mockups/kayak-mode/phase11/hooks.log`.
+
+**Review's follow-up and second stop.** Review requests lazy incident-edge
+entries, exit edges deferred through the floors queue, local same-edge
+checks, and a dry-box entry bound over the whole network. Walking batching
+is permitted only with equal per-connector wet counts and unchanged routes.
+The first timing cell must pass before the other validation starts.
+
+The lazy prototype still fails that cell: Abisko kayak p95 is
+**338.30 → 1,671.20 ms (4.940×)** on the same 200 phase-10 pairs. Median is
+**33 → 294.5 ms**; worst **526 → 2,461 ms**. Each of the five slowest pairs
+expands all **105,690** usable edges despite deferred discovery. Pair 78's
+**300,513** connector calls take **1,812 ms** of its **3,123 ms** instrumented
+runtime. Exit expansion takes **2,113 ms**, including **1,354 ms** in checks
+between middle points on the same edge; these times overlap. The box
+floors remain far below the winning land price. The full bound readings,
+profiles and frozen source are in the [measurement file](kayak-mode-phase11-measurements.md#lazy-prototype-follow-up)
+and `~/mockups/kayak-mode/phase11/lazy/`.
+
+**Build status after the second stop.** Not built; production source and
+tests are unchanged. The remaining cells, second sample, references,
+walking wet-count audit, pinned regressions, display/export checks, builds
+and drives remain pending the speed gate. No built note can yet report a
+passing phase. Review must address the remaining candidate-discovery cost;
+no change to the candidate set, objective or speed gate is proposed.
 
 ### Phase 10 — Carry on paths, launch at road ends, 2026-09-25
 
