@@ -1615,6 +1615,14 @@ sample, reference comparisons, walking midpoint-count audit, regressions,
 builds and drives were not started past the failed first gate. No candidate,
 price or gate decision is changed; candidate discovery still needs work.
 
+**Radius measurement, 2026-09-25.** Review makes the future interior candidate
+set local; **Uwe's decision is to measure before choosing the radius**. The
+[radius study](kayak-mode-phase11-measurements.md#radius-measurement-before-uwes-decision)
+records five starts per bin in all maps/settings and the Kloten readings,
+528 case-settings, with price, foot-distance and timing tables. Its
+recommendation is explicitly left for Uwe to decide. Production is unchanged;
+no radius is adopted and no build or drive was run.
+
 ## 5. Not in this plan
 
 - Sea kayaking's own concerns — wind, exposure, tides — nothing here prices them.
