@@ -3220,7 +3220,7 @@ def planning_keeps_what_it_had(page: Any) -> Check:
         [
             # **What the mark says and what the box slides to.** Two lists of the
             # same pages, agreeing until one of them was conditional.
-            Reading("the marks are the pages there are", sorted(by_mark), ["Details", "Elevation profile", "Points and stages"]),
+            Reading("the marks are the pages there are", sorted(by_mark), ["Elevation profile", "Points and stages"]),
             Reading("the points mark reaches the points", listed.get("holdsTheList"), True, note=listed.get("key")),
             Reading("and the profile mark the curve", curved.get("holdsTheCurve"), True, note=curved.get("key")),
             # The name of the tour goes where the list of its points went.
