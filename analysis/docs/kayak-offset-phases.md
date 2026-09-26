@@ -572,6 +572,109 @@ and decode coordinates in a small fixture. Full page drive remains for 12f/12g.
 source use, 12 m clearance and 2.1 m contour deviation. Stop on invalid water or loss that
 cannot be diagnosed within the frozen patches. Review any proposed new dependency here.
 
+**Done 2026-09-26 — the contours pass both gates everywhere they were drawn; nothing uses
+them yet.** `paddle_geometry.contours` in `libs/src/trails/network/paddle_geometry.py`, its
+tests in `libs/tests/trails/network/test_paddle_geometry.py`, and `water.eligible_bodies`,
+the bodies and height owners `_dissolved` always formed, now exposed. No graph, page, tile or
+browser run and no new dependency. Evidence, scripts, input hashes and resource figures are in
+scratch, `~/mockups/kayak-mode/offset-plan/phase-12b/` (`README.md` first).
+
+*What it draws.* Each eligible body (phase 9's centimetre dissolve, 1 ha before clipping,
+every island hole) is offset whole before the map cut; bodies never touch, so that is the
+offset of the whole union, one body in memory at a time. The contour is cut, never redrawn,
+where it is not held by a bank: at the lake/river interface (a pinned vertex; each side keeps
+its owner's `lake_body`, `lake_level` and `water_class`), at a **cap**, at a dam disc
+(production's analytic 25 m cut) and at the map crop. Every piece carries the bank ring and
+stations it follows. Each piece is simplified at 2 m with its ends pinned, written through the
+page's 1e-6° grid (`encoding.DEFAULT_COORDINATE_QUANTUM`) and read back, then gated: the exact
+distance of **every decoded segment** from the unsimplified bank at least 12 m, and the decoded
+piece within **2.1 m of the raw contour both ways, proved** rather than sampled (distance is
+1-Lipschitz, so a gap between two samples is bounded by their mean plus half the gap; gaps the
+1 m pass cannot bound are resampled at 0.05 m). A failing segment, or one that crosses another
+piece where the raw contours do not meet, gets the raw vertex it dropped farthest back.
+
+*A cap* is the stretch of contour that a closed-off bay's mouth, not a bank, holds 15 m off:
+the contour within d + 0.1 m of water a d-disc cannot reach, where that water reaches at least
+2d = 30 m beyond the reachable water (the plan's bay scale) or holds an access anchor. At a
+bay between two vertex shoulders that is their two arcs; at a smooth or wedge-shaped mouth
+it is a vertex and no cap segment exists. Indentations below that scale are smoothed over and
+stay shore.
+
+*The reference contour — an implementation choice, not Uwe's.* GEOS's buffer at **32 chords
+per quarter circle**. A fillet chord spans at most 1.5 angle quanta, so every raw contour point
+lies between d − 15·(1 − cos(3π/256)) = d − 0.0102 m and d from the bank; measured 0.0100 to
+0.0102 m on the patches, against 0.1527 to 0.1623 m at 8 chords. It costs 2.26× the raw
+vertices (305,837 against 135,551 over the patches and fixtures) and 2.0–2.5× the time to
+buffer and check them; the 2 m line does not grow, since the simplifier drops the chords. The
+error is harmless to both gates: clearance is measured against the bank, not the reference,
+and the reference lies at most 0.0102 m nearer the bank than an exact offset, a tenth of the
+0.1 m the deviation gate allows beyond the 2 m tolerance.
+
+*12a's deviation excess was the simplifier, not the geometry.* GEOS's topology-preserving
+simplifier moved closed rings by up to 2.731 m; Douglas–Peucker with pinned ends (a ring keeps
+three vertices, so it cannot collapse) holds 2 m by construction, and the page's grid adds at
+most 0.062 m. No piece needed a vertex back for either gate. Vertices came back only where two
+separately simplified pieces crossed: **34,275 → 34,280 / 89,903 → 89,905 / 127,821 →
+127,823** (Abisko / Malingsbo-Kloten / Lomsdal-Visten, whole maps); none on the patches.
+
+*Patches* (twelve frozen, nine synthetic; tables in scratch `README.md`). All pass. Least
+decoded shore clearance 12.966 m, deviation bound at most 2.1 m, largest sampled deviation
+2.03 m. The 2 m line has 1,812–5,504 vertices a patch, −27 % to +6 % against 12a's
+topology-preserving figures (fewer where 12a's simplifier kept rings whole); the synthetic fixtures behave as the 2d rule predicts, with caps
+at the 24 m channel, both island gaps, the 150 m bay and the bent inlet, none at the bottle
+bay's 26 m mouth (its closed-off water reaches under 30 m) or the lake/river mouth.
+
+*Whole maps, geometry only* — offset contours at 15 m, no centre lines, spurs, chords or
+noding; not graph or page figures:
+
+| | Abisko | Malingsbo-Kloten | Lomsdal-Visten |
+|---|---:|---:|---:|
+| Bodies offset | 342 | 569 | 989 |
+| Raw / 2 m vertices | 326,777 / 34,280 | 995,682 / 89,905 | 1,397,807 / 127,823 |
+| 2 m proxy Brotli bytes (12a's method) | 218,427 | 584,555 | 841,135 |
+| The plan's §3.1 proxy at 15 m, vertices / bytes | 31,890 / 207,161 | 84,140 / 558,320 | 119,127 / 798,479 |
+| Least shore clearance / p95, m | 12.967 / 14.988 | 12.957 / 14.981 | 12.957 / 14.979 |
+| Caps (reach ≥ 30 m, the rest anchored only) / cap m | 1,290 (516) / 6,612 | 2,530 (651) / 13,578 | 4,564 (1,712) / 19,548 |
+| Shore m | 752,700 | 1,973,927 | 2,714,545 |
+| Vanished / split bodies | 8 / 96 | 3 / 134 | 0 / 381 |
+| Largest deviation sample / proved bound, m | 2.030 / 2.100 | 2.042 / 2.100 | 2.048 / 2.100 |
+| Wall s / peak RSS MB (4 GiB cap) | 83 / 500 | 184 / 626 | 870 / 1,560 |
+
+The line costs 5 % more proxy bytes than the plan's estimate (11 / 26 / 43 kB), well inside
+the +0.5 / +1.0 / +1.5 MB page allowances, which cannot be judged until 12e adds the rest.
+Every map fits in 4 GiB body by body; Lomsdal-Visten's sea (273,219 input vertices) takes
+678 s of the 870 and needs no partition at this cap.
+
+*What 12c must know.*
+
+- **Vanished bodies**, all Swedish river surfaces, as 12a found: Abisko 8, at (lon, lat)
+  18.187043 68.22133, 19.006917 68.197736, 18.997314 68.21874, 18.415914 68.394552,
+  18.558148 68.407513, 18.661879 68.37671, 18.384298 68.408979, 18.748383 68.307251;
+  Malingsbo-Kloten 3, at 15.034659 59.999573, 15.908374 59.843853, 15.097146 60.139224.
+  Their records, and every other one, are in `whole-<map>.json`.
+- **Closed-off water** is returned per piece with its kind (terminal, loop, passage) and
+  reach. Passages and loops under 30 m are not caps but still need their centre line; caps
+  with no cap segment (393 / 618 / 1,478) meet the contour at a single vertex, where a centre
+  branch joins.
+- **Specks**: 41 / 41 / 87 offset parts under 1 m² are left out and reported; each marks a
+  place where a d-disc only just fits, a narrow that the centre line must carry.
+- **Contacts**: two raw pieces less than 0.13 m apart (0.019 m at the one probed) cross once
+  written on the grid, and no vertex can separate them. Reported, not refined, as water
+  barely wider than 2d: Malingsbo-Kloten at 15.306432 60.131638, Lomsdal-Visten at
+  12.639847 65.651648 and 12.259418 65.573545.
+
+*What 12d and 12e must know.* Sweden's water is loaded by the map box, whole features only,
+so a bank just outside the box can be the edge of a neighbouring feature that was not loaded,
+and the offset carries it 15 m inside. Of the contour held by a bank outside the load window
+(36 / 25 / 9 pieces), Abisko's at 18.149988 68.2772 and 19.099706 68.176394 is such an edge:
+the bank there changes when the window grows by 0.02°. Before the line is built for a page,
+the water must be loaded with a halo of at least d + 2.1 m around the extent. Anchors here
+are all of 12a's contacts, inferred bridges included; they make 60 / 74 / 62 % of the caps.
+
+*For review.* Whether every contact kind counts as an anchor that keeps a small bay's cap, or
+only access anchors (launches, landings, mouths); whether 0.13 m, twice the grid's largest
+vertex move, is the right contact distance; and the reference-contour choice above.
+
 ### Phase 12c — Centre lines and all the missing passages
 
 *Files:* `paddle_geometry.py`, geometry/topology tests, scratch

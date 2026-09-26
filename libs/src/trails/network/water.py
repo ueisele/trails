@@ -276,10 +276,42 @@ def _boundary_lines(geometry: BaseGeometry) -> list[LineString]:
     return [part for part in shapely.get_parts(shapely.line_merge(shapely.MultiLineString(parts))) if isinstance(part, LineString)]
 
 
-def _dissolved(
-    metric: gpd.GeoDataFrame, class_field: str | None, lake_classes: tuple[str, ...], level_field: str | None
-) -> tuple[list[tuple[dict[str, Any], BaseGeometry]], BaseGeometry]:
-    """Dissolve deliveries without merging the lake planes through river surfaces."""
+@dataclass(frozen=True)
+class Bodies:
+    """The eligible water before any clipping: delivery polygons, their bodies and their owners.
+
+    Attributes:
+        polygons: Delivery polygons on the centimetre grid, eligible bodies only
+        parents: Row of each polygon in the frame it came from
+        body: Connected body of each polygon; bodies never touch one another
+        owner: Index into ``owners`` of each polygon
+        owners: Lake groups first, then one entry per non-lake class, each with
+            the ``LAKE_BODY``, ``LAKE_LEVEL`` and ``SURFACE_CLASS`` its lines carry
+    """
+
+    polygons: np.ndarray
+    parents: np.ndarray
+    body: np.ndarray
+    owner: np.ndarray
+    owners: list[dict[str, Any]]
+
+    def union(self, body: int) -> BaseGeometry:
+        """One connected body's water, whole: its bank is its boundary, islands are its holes."""
+        return shapely.union_all(self.polygons[self.body == body])
+
+
+def eligible_bodies(metric: gpd.GeoDataFrame, class_field: str | None, lake_classes: tuple[str, ...], level_field: str | None) -> Bodies:
+    """The water the paddled network is built from, grouped by body and owner, before any map cut.
+
+    Args:
+        metric: Water polygons in a metric CRS, delivery pieces retained
+        class_field: Surface classification column, or None when all surfaces are lakes
+        lake_classes: Values of that column identifying lakes
+        level_field: Registered height column, or None
+
+    Returns:
+        The polygons of bodies of at least ``MIN_PADDLE_HA``, with body and owner labels
+    """
     # The shore investigation used a centimetre grid to close reprojection
     # cracks between deliveries; it is finer than the page's coordinate quantum.
     polygons, parents = shapely.get_parts(shapely.set_precision(shapely.force_2d(metric.geometry.to_numpy()), 0.01), return_index=True)
@@ -288,32 +320,43 @@ def _dissolved(
     labels = _components(len(polygons), shapely.STRtree(polygons).query(polygons, predicate="intersects"))
     eligible = {label for label in np.unique(labels) if shapely.union_all(polygons[labels == label]).area >= MIN_PADDLE_HA * 10_000}
     keep = np.isin(labels, list(eligible))
-    polygons, parents = polygons[keep], parents[keep]
+    polygons, parents, labels = polygons[keep], parents[keep], labels[keep]
     if not len(polygons):
-        return [], LineString()
+        empty = np.empty(0, dtype=int)
+        return Bodies(np.empty(0, dtype=object), empty, empty, empty, [])
     # The delivery grid closes seams; subsequent clipping must keep its exact
     # intersection points rather than round the two sides of a cut separately.
     polygons = shapely.set_precision(polygons, 0)
-    boundary = shapely.union_all(polygons).boundary
     classes = metric[class_field].to_numpy()[parents] if class_field else np.full(len(polygons), None, dtype=object)
     is_lake = np.ones(len(polygons), dtype=bool) if class_field is None else np.isin(classes, lake_classes)
     levels = metric[level_field].map(_registered_level).to_numpy(dtype=float)[parents] if level_field else np.full(len(polygons), np.nan)
     lakes = polygons[is_lake]
     lake_labels = _components(len(lakes), shapely.STRtree(lakes).query(lakes, predicate="intersects"))
-    groups: list[tuple[dict[str, Any], BaseGeometry]] = []
+    owner = np.full(len(polygons), -1, dtype=int)
+    owners: list[dict[str, Any]] = []
     for label in np.unique(lake_labels):
         own = lake_labels == label
         registered = levels[is_lake][own]
         finite = registered[np.isfinite(registered)]
-        groups.append(
-            (
-                {LAKE_BODY: f"lake-{label}", LAKE_LEVEL: float(finite.min()) if len(finite) else np.nan, SURFACE_CLASS: classes[is_lake][own][0]},
-                shapely.union_all(lakes[own]),
-            )
+        owner[np.flatnonzero(is_lake)[own]] = len(owners)
+        owners.append(
+            {LAKE_BODY: f"lake-{label}", LAKE_LEVEL: float(finite.min()) if len(finite) else np.nan, SURFACE_CLASS: classes[is_lake][own][0]}
         )
     for kind in pd.unique(classes[~is_lake]):
-        groups.append(({LAKE_BODY: None, LAKE_LEVEL: np.nan, SURFACE_CLASS: kind}, shapely.union_all(polygons[(classes == kind) & ~is_lake])))
-    return groups, boundary
+        owner[(classes == kind) & ~is_lake] = len(owners)
+        owners.append({LAKE_BODY: None, LAKE_LEVEL: np.nan, SURFACE_CLASS: kind})
+    return Bodies(polygons, parents, np.unique(labels, return_inverse=True)[1], owner, owners)
+
+
+def _dissolved(
+    metric: gpd.GeoDataFrame, class_field: str | None, lake_classes: tuple[str, ...], level_field: str | None
+) -> tuple[list[tuple[dict[str, Any], BaseGeometry]], BaseGeometry]:
+    """Dissolve deliveries without merging the lake planes through river surfaces."""
+    found = eligible_bodies(metric, class_field, lake_classes, level_field)
+    if not len(found.polygons):
+        return [], LineString()
+    boundary = shapely.union_all(found.polygons).boundary
+    return [(attributes, shapely.union_all(found.polygons[found.owner == index])) for index, attributes in enumerate(found.owners)], boundary
 
 
 def cut_streams(streams: gpd.GeoDataFrame, dams: gpd.GeoDataFrame, *, metric_crs: str) -> gpd.GeoDataFrame:
