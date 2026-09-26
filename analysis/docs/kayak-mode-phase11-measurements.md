@@ -1,11 +1,12 @@
 # Phase 11 measurements
 
-**Stopped again at the speed gate, 2026-09-25. Phase 11 is not built.** The
-first prototype improves the Kloten entries but raises Abisko kayak p95
-by 3.245×. Review's lazy follow-up raises it by 4.940×; its evidence is
-[below](#lazy-prototype-follow-up). Production source and tests are
-unchanged. These measurements describe browser prototypes, not the
-shipped planner. The first stop remains history in the following sections.
+**Local entries built and validated, 2026-09-26.** Uwe has
+approved d + 250 m at both endpoints in all four settings and the audited
+walking connector batching. All twelve phase-10 speed gates and all 2,928
+reference comparisons pass. The
+[current implementation measurements](#local-entries-after-uwes-decision)
+follow the radius study. The first prototype's 3.245× Abisko slowdown and
+the lazy prototype's 4.940× slowdown remain history in the sections below.
 
 ## Kloten
 
@@ -2188,3 +2189,359 @@ All 528 case-settings. For each local variant, the timing cell is the map/settin
 | d + 100 m | 34.66% | 20.06% | lomsdal-visten / kayak | 4,895.15 → 5,305.30 |
 | d + 250 m | 30.11% | 11.57% | lomsdal-visten / kayak-paths | 4,615.60 → 5,224.45 |
 | Unlimited | 0.00% | 0.00% | — | Untimed reference |
+
+## Local entries after Uwe's decision
+
+Uwe's **“Ja”**, 2026-09-25, approves **d + 250 m** at both free endpoints,
+in walking and kayak with either switch setting. Walking scope is now his
+decision, superseding review's earlier extension. He also approves shipping
+the audited walking midpoint batching. The two speed stops and radius study
+above remain the history of how this candidate set was chosen.
+
+### Candidate construction and bounds
+
+`ENTRY_MARGIN = 250` sits beside the planner constants and cites the radius
+study. The router caches cumulative geometry lengths. Each query finds its
+nearest eligible segment through `edgeIndex`: a bounded doubling bracket
+finds a radius containing a network point, then the index enumerates all
+segments within the nearest distance plus the margin. There is no per-query
+pass over all edges or segments. The index rectangle uses conservative
+coordinate scales; exact segment distance uses the page's metre function,
+48 ternary refinements and both endpoints. Every closer segment lies inside
+the discovered rectangle. Eligibility follows the current mode's finite
+edge price and permitted directions.
+
+The radius tests the nearest point of the **segment**, not the eventual
+connector's length. Each selected segment contributes the clamped dry-ground
+`cos θ = f/g` point for each allowed direction. Every connector is then
+priced at its original 25 m grid midpoints, including kayak dam discs.
+Crossing water can move the continuous optimum away from this dry candidate;
+that caveat is unchanged. Sparse per-query lists attach candidates to their
+permitted nodes. A sorted sweep checks pieces between candidates on the
+same edge, including a free endpoint opposite an attached endpoint.
+
+The kayak common entry floor is the minimum of the existing node floors
+and the dry-box floors of every enumerated interior point. Each floor
+counts only connector midpoints proved inside the dry box; taking their
+minimum bounds every possible entry in this candidate set. Partial edges
+add nonnegative land. Same-edge routes are evaluated separately. A connector
+rejected under an incumbent is not cached as a permanent rejection. No
+factor, objective, snap reach, grid, attached `endsOf` rule or whole-leg
+`worthRouting` fallback changes.
+
+Walking calls `connectorScan` without kayak dam discs. Its connector function
+is byte-identical to the radius study's audited implementation: **48,000
+connectors, equal wet midpoint counts, largest price difference zero**. The
+standalone regression also compares batched walking counts and prices with
+the scalar loop on its generated grid connectors.
+
+### Inputs and reference
+
+The phase-10 sample remains **200 frozen pairs per map**, seed **20260923**,
+with the same endpoints and attachments in all four settings: **2,400
+comparisons**. The second sample is the radius study's frozen **120 starts**
+(five per requested offset bin per map), plus **48 Kloten case-settings**:
+**528 comparisons**. Its bins, seed derivatives, dry rejection and frozen
+target selection are described above. No endpoint was regenerated for this
+build. All 2,400 measured baseline labels exactly equal their frozen phase-10
+land and secondary prices. The Kloten supplements are twelve free rows in each setting; the
+separate regression checks all 24 kayak free rows and all 24 attached rows.
+
+The reference independently scans eligible geometry and finds nearest
+distance by 64 golden-section refinements, retaining both segment ends.
+Its conservative coordinate-box floor only skips minimisation outside an
+already known radius; the final nearest distance can only decrease. It
+constructs its own analytic points, eagerly prices every eligible node
+connector, runs reverse Dijkstra to exhaustion and checks same-edge pairs
+by enumeration. It shares neither production's spatial index, candidates,
+dry floors nor incumbent pruning. Its explicit pop bound counts all seeds
+and directed arcs independently of production's queue bound.
+
+The browser reference reuses the separately audited midpoint batching,
+without a ceiling. Between switch settings it memoises only connector
+lengths and integer wet counts; every node is still considered and priced.
+Every 1,009th node is checked against a fresh complete connector price.
+Two attached endpoints are compared through the page’s unchanged
+`routeBetween` and `worthRouting` path; free endpoints exercise `joinedRoute`.
+This includes the existing piece between two attached points on one edge.
+The timing harness keeps the frozen phase-10 `joinedRoute` protocol.
+Standalone routing tests use the independent scalar midpoint loop. Price
+comparisons allow `1e-8 + 1e-12 × abs(reference)` to accommodate floating-point
+summation order, far below the study's 0.01 reporting threshold.
+
+Timings use the same browser and frozen page for old and new searches,
+four warm-up pairs for each, then baseline followed by production for each
+case. They measure the search, including candidate construction; the
+reference is not timed as production. Percentiles interpolate linearly at
+`p × (n − 1)`. Firefox 153 runs through Playwright 1.62.0. All graph/browser
+work is serial under an 8 GiB address-space cap. Frozen pages and cache inputs
+are read-only. State is restored after each measurement.
+
+### Pinned Kloten geometry
+
+All 48 rows were checked against the full frozen graph before extracting the
+fixture: **24 free rows match the virtual table**, and **24 attached rows
+retain their old route**. The largest free-row differences are
+**2.890005×10⁻⁵ m carry**, **1.769479×10⁻⁹ land price** and
+**3.543391×10⁻⁹ secondary price**. Attached carry differs by exactly zero;
+its largest price-rounding differences are **5.684342×10⁻¹⁴ land** and
+**1.136868×10⁻¹³ secondary**.
+
+`kloten_phase11.json` contains the union of those baseline and northern
+routes: **167 edges, 166 nodes**, with original edge/node identifiers,
+geometry, source prices, dam discs and a crop containing **4,057 wet cells**.
+The crop retains the original grid origin and indexing. The test checks the
+virtual prices and the northern launch rather than a hand-drawn substitute
+road. Separate walking tests cover two free points on one road at **8 m**
+and **400 m** from it, in both settings, and permitted directions through
+two edges that meet at a junction.
+
+### Stored plans
+
+Loading a stored plan does **not** run the new whole-leg search afresh.
+`restoreKept` still calls `loadGpx(text, 'asis')`. Recorded parts keep their
+geometry; a routed part first reroutes between its own saved ends and checks
+its saved length, then tries matching, then retains the recorded line if
+neither reproduces it. The stored part boundaries take precedence over
+searching the whole leg. An old western Kloten leg therefore normally still
+shows its western route on load. Editing the endpoint pair releases that
+restoration and lets the new interior candidates compete. This phase changes
+none of those restoration functions.
+
+### Phase-10 speed gate
+
+| Map | Setting | Baseline p95, ms | Local entries p95, ms | Ratio |
+|---|---|---:|---:|---:|
+| Abisko | kayak | 334.10 | 350.30 | 1.048 |
+| Abisko | kayak-paths | 334.85 | 352.05 | 1.051 |
+| Abisko | walking | 1,507.35 | 418.15 | 0.277 |
+| Abisko | paths | 763.60 | 258.60 | 0.339 |
+| Malingsbo-Kloten | kayak | 2,023.70 | 2,069.00 | 1.022 |
+| Malingsbo-Kloten | kayak-paths | 2,077.90 | 2,124.20 | 1.022 |
+| Malingsbo-Kloten | walking | 2,630.40 | 1,014.35 | 0.386 |
+| Malingsbo-Kloten | paths | 2,087.60 | 802.10 | 0.384 |
+| Lomsdal-Visten | kayak | 3,437.95 | 3,779.40 | 1.099 |
+| Lomsdal-Visten | kayak-paths | 3,568.80 | 3,724.15 | 1.044 |
+| Lomsdal-Visten | walking | 10,897.85 | 3,845.20 | 0.353 |
+| Lomsdal-Visten | paths | 3,915.00 | 1,684.20 | 0.430 |
+
+All twelve cells pass. Abisko kayak was measured first, as required.
+Lomsdal-Visten walking falls from **10.898 s to 3.845 s**, **64.7% lower**.
+The largest kayak ratio is **1.099**, on Lomsdal-Visten with the switch off.
+Abisko kayak median is **31 → 35 ms**. Norway walking median rises from
+**106.5 → 159 ms** while its slow tail becomes markedly faster.
+
+### Radius-sample timings
+
+These use the same local implementation, with today’s nodes-only planner
+as the baseline on the same cases. Each Abisko/Norway cell has 40 starts;
+each Kloten cell has 40 starts plus twelve rental-road readings.
+
+| Map | Setting | Cases | Baseline p95, ms | Local entries p95, ms |
+|---|---|---:|---:|---:|
+| Abisko | kayak | 40 | 525.60 | 563.05 |
+| Abisko | kayak-paths | 40 | 534.10 | 541.55 |
+| Abisko | walking | 40 | 1,485.15 | 406.20 |
+| Abisko | paths | 40 | 1,000.55 | 345.00 |
+| Malingsbo-Kloten | kayak | 52 | 2,614.50 | 2,599.60 |
+| Malingsbo-Kloten | kayak-paths | 52 | 2,613.75 | 2,654.70 |
+| Malingsbo-Kloten | walking | 52 | 2,968.60 | 1,132.05 |
+| Malingsbo-Kloten | paths | 52 | 2,670.50 | 984.25 |
+| Lomsdal-Visten | kayak | 40 | 4,877.45 | 5,019.05 |
+| Lomsdal-Visten | kayak-paths | 40 | 4,769.10 | 5,142.10 |
+| Lomsdal-Visten | walking | 40 | 12,729.30 | 4,260.30 |
+| Lomsdal-Visten | paths | 40 | 5,587.30 | 2,286.10 |
+
+### Walking answers that change
+
+A change here means more than 0.01 cost units. All reported changes reduce
+cost under the unchanged objective; no case increases it. Magnitudes below
+are reductions among changed cases, not averages over unchanged pairs.
+
+| Map | Setting | Changed / 200 | Median reduction | p95 reduction | Largest reduction | Largest relative reduction |
+|---|---|---:|---:|---:|---:|---:|
+| Abisko | walking | 51 | 92.288 | 1,091.842 | 1,996.704 | 11.189% |
+| Abisko | paths | 64 | 544.297 | 8,219.268 | 14,799.230 | 34.476% |
+| Malingsbo-Kloten | walking | 101 | 208.105 | 991.191 | 1,680.454 | 42.869% |
+| Malingsbo-Kloten | paths | 123 | 270.022 | 2,041.100 | 4,682.051 | 29.964% |
+| Lomsdal-Visten | walking | 34 | 100.012 | 3,689.865 | 5,271.998 | 20.051% |
+| Lomsdal-Visten | paths | 48 | 213.129 | 3,716.313 | 6,782.722 | 14.566% |
+
+Walking distance follows the route rather than the objective; a cheaper
+way may be longer. These are signed new-minus-old foot metres over all
+200 pairs, excluding ferries and retaining the phase-10 connector convention.
+Ground connectors count at their full geometric length here, including wet
+samples; this benchmark measure is not the panel's dry-foot split.
+
+| Map | Setting | Changed distance / 200 | Median, m | p95, m | Minimum, m | Maximum, m |
+|---|---|---:|---:|---:|---:|---:|
+| Abisko | walking | 51 | 0.000 | 103.531 | -279.849 | 3,186.955 |
+| Abisko | paths | 64 | 0.000 | 276.101 | -952.271 | 2,828.230 |
+| Malingsbo-Kloten | walking | 101 | 0.000 | 186.804 | -721.156 | 3,604.579 |
+| Malingsbo-Kloten | paths | 123 | 0.000 | 138.856 | -2,080.158 | 942.440 |
+| Lomsdal-Visten | walking | 33 | 0.000 | 2.541 | -722.500 | 1,328.925 |
+| Lomsdal-Visten | paths | 48 | 0.000 | 10.829 | -2,333.414 | 3,239.148 |
+
+### Reference results
+
+All **2,928 comparisons pass**: **2,400** on the frozen phase-10 sample and
+**528** on the radius sample. Every expected index occurs exactly once in
+the final result files. The largest absolute differences are
+**2.910383×10⁻¹¹ land price** and **5.820766×10⁻¹¹ secondary price** on phase 10,
+and **7.275958×10⁻¹² land price** and **5.820766×10⁻¹¹ secondary price** on the
+radius sample. Every periodic fresh-price check of the midpoint-count cache
+has exactly zero difference. These are summation-rounding differences, far
+below the comparison tolerance and the 0.01 reporting threshold.
+
+### Lomsdal-Visten walking profile
+
+The first prototype's scalar connector profile found 94–95% of walking time
+inside `connectorPrice`, including 426 million `connectorWaterAt` calls on
+pair 56. The shipped change batches the same midpoints through `connectorScan`.
+The seven pairs below are the union of the five slowest before and after
+queries. Instrumentation checks the same route prices as the uninstrumented
+search. Times are milliseconds; scan time is **inside** connector time, so
+those columns must not be added. The speed gate uses the separate,
+uninstrumented measurements above.
+
+| Pair | Before, uninstrumented | After, uninstrumented | Profile total | Connector calls | Connector time | Scan time | Candidate time | Other time |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 52 | 12,533 | 3,748 | 3,629 | 229,444 | 2,786 | 2,682 | 149 | 693 |
+| 56 | 14,203 | 5,676 | 5,684 | 221,261 | 4,444 | 4,343 | 472 | 768 |
+| 76 | 12,207 | 5,016 | 5,247 | 215,194 | 3,352 | 3,245 | 987 | 908 |
+| 96 | 11,323 | 4,608 | 4,204 | 191,439 | 2,484 | 2,395 | 865 | 855 |
+| 119 | 12,676 | 4,528 | 3,988 | 189,806 | 3,251 | 3,165 | 8 | 729 |
+| 137 | 13,513 | 4,837 | 5,012 | 190,791 | 3,779 | 3,692 | 390 | 843 |
+| 172 | 12,832 | 3,844 | 3,642 | 250,273 | 2,760 | 2,638 | 5 | 877 |
+
+Connectors now take **59.1–81.5%** of these instrumented queries; local
+candidate construction takes **5–987 ms**. The same-edge sweep takes at most
+**1 ms** here. The remaining **693–908 ms** includes queue/search work and
+instrumentation overhead; it is not separately attributed. Pair 56 falls
+from **14.203 s to 5.676 s** uninstrumented. Its profile reads **221,261
+connectors**, **4.444 s** in pricing, of which **4.343 s** is midpoint scanning,
+and **0.472 s** constructing interior candidates. The connector-layer fix is
+shipped without changing its midpoint counts or prices; no additional search
+or objective change is made to chase the remaining time.
+
+### Build, display and export
+
+All three pages were rebuilt with `command make map`, serially under the
+8 GiB cap. The worktree uses links to the main checkout's existing tile,
+terrain and pack directories. No tile build, download, graph command or
+shared-cache write was needed. The rebuilt graph headers and encoded data
+are byte-identical to the frozen phase-10 pages on all three maps. Each new
+page embeds the measured search and the connector/partial-edge renderer.
+
+The Kloten raw-tap drive places E8 at z17 and W8 at z16/z17, then restores
+the borrowed plan, mode, switch, goal way, view and undo history. Every case
+uses the northern launch at road node **141123**, launch edge **284183**.
+The z17 starts remain off-network and enter road edge **45537** internally;
+W8 at z16 still snaps to that road.
+
+| Raw start | Stay on paths | On foot, m | Land price |
+|---|---|---:|---:|
+| E8, z17 | off | 231.360461 | 313.813413 |
+| E8, z17 | on | 234.083470 | 368.891389 |
+| W8, z16 | off/on | 223.373607 | — |
+| W8, z17 | off | 228.255918 | — |
+| W8, z17 | on | 230.190744 | — |
+
+The measured W8 zoom differences are **4.882311 m** off and **6.817137 m**
+on. The largest discrepancy against the earlier virtual-table difference is
+**0.000021 m**; the drive retains its **0.001 m** comparison tolerance around
+those independent figures. Both zooms take the same northern way.
+
+The rendered parts are ground connector followed by partial road, with
+exactly the same joining coordinate. The displayed total and paddle/foot
+split include both parts. Both actual writers, Garmin and GPX, retain the
+raw start and the interior joining point at their coordinate precision.
+
+The walking reading uses E8 at z17 toward **(59.897429, 15.288255)**. It
+stays off-network, enters road **45537** in its middle and draws a
+**8.803833 m** connector followed by partial road. Its total on foot is
+**172.629568 m**, at walking cost **239.384955**. State restoration passes
+for every borrowed reading.
+
+### Scene figures that move
+
+The selected drives measured the following changes under the same prices.
+The scene records now carry phase-11 notes. Kayak route checks, walking
+exclusion of paddle/portage/launch edges, and restoration checks stay green.
+The Kloten carry example uses more road and less straight ground; its
+physical carry increases while the unchanged objective prefers it.
+
+| Map | Reading | Before, m | After, m |
+|---|---|---:|---:|
+| Abisko | walking: shore foot | 2,935.858 | 2,259.064 |
+| Abisko | walking: shore water | 20.295 | 15.244 |
+| Abisko | walking: shore straight land | 509.340 | 352.926 |
+| Abisko | stay on paths: shore foot | 2,948.287 | 2,265.931 |
+| Abisko | stay on paths: shore water | 30.405 | 20.331 |
+| Abisko | stay on paths: shore straight land | 495.624 | 339.992 |
+| Malingsbo-Kloten | Kayak, paths off: on foot m | 147.612 | 163.893 |
+| Malingsbo-Kloten | Kayak, paths off: straight ground m | 88.881 | 51.201 |
+| Malingsbo-Kloten | Kayak, paths off: road m | 52.325 | 106.286 |
+| Malingsbo-Kloten | walking: shore foot | 3,266.274 | 3,225.664 |
+| Malingsbo-Kloten | walking: shore water | 8.024 | 19.836 |
+| Malingsbo-Kloten | walking: shore straight land | 70.879 | 60.960 |
+| Malingsbo-Kloten | stay on paths: shore foot | 3,266.274 | 3,239.750 |
+| Malingsbo-Kloten | stay on paths: shore water | 8.024 | 13.206 |
+| Malingsbo-Kloten | stay on paths: shore straight land | 70.879 | 65.192 |
+| Malingsbo-Kloten | helper input: whole way | 9,284.155 | 9,279.533 |
+| Lomsdal-Visten | walking: shore foot | 1,074.646 | 964.077 |
+| Lomsdal-Visten | walking: shore straight land | 747.568 | 659.594 |
+| Lomsdal-Visten | stay on paths: shore foot | 1,593.360 | 1,434.653 |
+| Lomsdal-Visten | stay on paths: shore straight land | 496.858 | 469.627 |
+| Lomsdal-Visten | typed leg: whole way | 1,066.298 | 988.686 |
+
+The first full drive found two further Kloten scene hashes changed: the dry
+walking journey's figures and GPX descriptions. Comparing both pages' actual
+text gives **22,957.433909 → 22,971.137579 m** on foot, **0.22 → 0.03 km**
+drawn straight, **19.53 → 19.74 km** on Topografi 50 roads, and
+**9,051 → 9,053 points**. The new rule chooses more road and less ground;
+height figures and wording remain unchanged. Both hashes now carry a phase-11
+note. The initial full run had no broken invariants on any map; these two
+recorded figures required the rerun.
+
+### Final validation
+
+The required selected entry/kayak checks pass twice on each page. After the
+dry-route hash update, its check also passes twice on Kloten. The complete
+`command make drive-all ARGS="--json"` rerun is green:
+
+| Page | Readings | Broken invariants | Moved figures | Scene skips |
+|---|---:|---:|---:|---:|
+| Abisko | 1,638 | 0 | 0 | 4 |
+| Lomsdal-Visten | 1,644 | 0 | 0 | 4 |
+| Malingsbo-Kloten | 1,793 | 0 | 0 | 4 |
+
+The drive workloads ran serially under 8 GiB caps. All three map builds used
+existing cached inputs; graph headers and data remain byte-identical. No
+graph or tile build, cache mutation, push or publication was performed.
+
+Evidence is retained under `~/mockups/kayak-mode/phase11/built/`:
+`reference-proof.json`, `summary.json`, `tables.md`, `profile/`,
+`walking-batch-proof.json`, `graph-proof.json`, `entry-drive.json`,
+`drive-*-done.json`, `drive-all-*.log`, and `drive-all-done.json`.
+The first full drive and dry-text comparison are retained separately.
+
+The scene skips are applicability limits, not uncompleted phase-11 checks.
+Abisko and Lomsdal-Visten skip the four Kloten-specific rental-road,
+launch, carry-switch and Korslång-channel checks. Kloten skips its existing
+borrowed-name check (no named Topografi 50 trail chain), sound-crossing check
+(no island-across-sound scene), old loop-fallback check (no such measured
+taps), and generic beside-path tap check (no scene pair). Its dedicated
+phase-11 raw-tap entry readings run and pass.
+
+`command make hooks-run` passes with network available: ruff format and
+lint, mypy, both repository pytest suites, and the remaining file hooks.
+The first run found one obsolete renderer source-text assertion; updating
+it to the connector/partial-edge structure made the complete rerun green.
+The 48-row Kloten fixture, both walking distances (8 m and 400 m), directed
+meeting edges, and 7,000 scalar-versus-batched walking connectors all pass.
+The walking connector regression has zero wet-count mismatches and zero
+price difference. The repository's `make test` target excludes tests marked
+`integration`; that target was used unchanged. Logs are `hooks.log` and
+`hooks-done.json` beside the other evidence. No further routing decision is
+needed for this phase; far off-path exits remain the recorded deferred item.

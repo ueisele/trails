@@ -2899,16 +2899,27 @@ way is on paths for* 6.3 → 6.8 km and *straight for* 0.9 → 0.8 (the goal's t
 the way reaches it along the line rather than straight from a junction). The index costs 91 ms on
 Lomsdal and 15 on Abisko, recorded. Both pages 677 readings, none broken.
 
-**Phase 11, 2026-09-25 — off-network entries, not yet built.** Review extends
-the [kayak phase-11 entry rule](kayak-mode-phases.md#phase-11--enter-an-edge-in-its-middle)
-to both walking settings: an off-network point may join a segment interior,
-priced by the unchanged walking objective. This is review's decision,
-separate from Uwe's request for the kayak entries. The first prototype
-stops on Abisko's kayak p95 gate, 334.05 → 1,084.15 ms. Review's lazy
-follow-up also stops, at 338.30 → 1,671.20 ms: its five slowest pairs still
-expand all 105,690 usable edges. See the [phase-11 measurements](kayak-mode-phase11-measurements.md#lazy-prototype-follow-up).
-Walking source and restoration remain unchanged; its comparisons,
-per-connector wet-count audit and drives are pending the speed gate.
+**Phase 11, 2026-09-25 — Uwe approves local interior entries and exits.**
+Review initially proposed sharing the [kayak entry rule](kayak-mode-phases.md#phase-11--enter-an-edge-in-its-middle)
+with walking. After two speed stops and the radius study, Uwe answers
+**"Ja"** to **d + 250 m** for both endpoints in all four settings; walking
+scope is now his decision too. Here `d` is the distance to the nearest
+eligible network point. All node candidates remain, and the walking
+objective, factors and stored-plan restoration stay unchanged. Uwe also
+approves midpoint batching after the 48,000-connector audit found identical
+wet counts and prices. The [phase-11 measurements](kayak-mode-phase11-measurements.md)
+retain both rejected prototypes and the radius evidence. Distant mid-edge
+exits beyond the radius belong to the atlas design and are not scheduled.
+
+**Built 2026-09-26.** Phase 11's independent references pass all 2,928 cases
+across the three maps. Abisko walking changes 51/200 frozen answers and
+Stay on paths 64/200, always for lower cost under the same objective.
+Their p95 times fall **1,507.35 → 418.15 ms** and **763.60 → 258.60 ms**.
+The new connector and partial edge are drawn and exported together;
+stored-plan restoration stays unchanged. The [phase-11 record](kayak-mode-phase11-measurements.md#walking-answers-that-change)
+contains the changes, both timing samples and the shared rule Uwe approved.
+Selected checks pass twice; Abisko's full drive has 1,638 readings with no
+broken invariants or moved figures. Hooks pass with both test suites.
 
 ---
 

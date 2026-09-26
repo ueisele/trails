@@ -14,6 +14,9 @@
             // Wherever no network reaches, a straight line stays the answer --
             // this changes the trade, not what is possible.
             var PATHS_FACTOR = 10;
+            // Uwe chose d + 250 m after the phase-11 radius study; see
+            // analysis/docs/kayak-mode-phase11-measurements.md.
+            var ENTRY_MARGIN = 250;
             // Read when first asked and not when this runs: the key is the
             // panel's prefix, and the panel is not always there yet.
             var stayingOnPaths = null;
@@ -448,6 +451,201 @@
                 return bounds;
             }
 
+            // The dry-ground stationary point has cos(theta) = edge / ground.
+            // These are candidates, not a continuous optimum over the water
+            // grid: every connector is subsequently sampled at its own midpoints.
+            function entryGeometry(graph) {
+                var work = router(graph);
+                if (work.entryGeometry) { return work.entryGeometry; }
+                var along = new Float64Array(graph.coordinates.length / 2), latitude = 0, eligible = 0;
+                var far = panel().metresBetween;
+                // Geometry is shared by all queries at this setting. Query work
+                // below follows only the cells intersecting the local radius.
+                for (var edge = 0; edge < graph.header.edges; edge += 1) {
+                    var length = 0;
+                    for (var v = graph.vertexAt[edge]; v < graph.vertexAt[edge + 1]; v += 1) {
+                        latitude = Math.max(latitude, Math.abs(graph.coordinates[2 * v + 1]));
+                        if (v > graph.vertexAt[edge]) {
+                            length += far(graph.coordinates[2 * v - 2], graph.coordinates[2 * v - 1],
+                                graph.coordinates[2 * v], graph.coordinates[2 * v + 1]);
+                        }
+                        along[v] = length;
+                    }
+                    if (isFinite(work.cost[edge]) && work.length[edge]) { eligible += 1; }
+                }
+                work.entryGeometry = {index: edgeIndex(graph), along: along, latitude: latitude, eligible: eligible};
+                return work.entryGeometry;
+            }
+
+            function entryContext(graph, point) {
+                var geometry = entryGeometry(graph), far = panel().metresBetween;
+                var latitude = Math.max(Math.abs(point.lat), geometry.latitude);
+                return {point: point, geometry: geometry,
+                    sx: far(0, latitude, 1, latitude), sy: far(0, -1, 0, 1) / 2,
+                    x: far(point.lon, point.lat, point.lon + 0.001, point.lat) / 0.001,
+                    y: far(point.lon, point.lat, point.lon, point.lat + 0.001) / 0.001};
+            }
+
+            function entrySegment(graph, context, vertex, refine) {
+                var co = graph.coordinates, p = context.point, x = co[2 * vertex], y = co[2 * vertex + 1];
+                var dx = co[2 * vertex + 2] - x, dy = co[2 * vertex + 3] - y;
+                var sx = dx * context.sx, sy = dy * context.sy, px = (p.lon - x) * context.sx, py = (p.lat - y) * context.sy;
+                var square = sx * sx + sy * sy, t = square ? Math.max(0, Math.min(1, (px * sx + py * sy) / square)) : 0;
+                var lower = Math.hypot(px - t * sx, py - t * sy);
+                if (!refine) { return lower; }
+                // Minimise the page's distance, whose latitude scale changes
+                // along a segment. The bounded bracket and explicit endpoints
+                // retain clamped minima, unlike the index's fixed cosine.
+                var far = panel().metresBetween, lo = 0, hi = 1;
+                for (var step = 0; step < 48; step += 1) {
+                    var a = lo + (hi - lo) / 3, b = hi - (hi - lo) / 3;
+                    if (far(p.lon, p.lat, x + a * dx, y + a * dy) < far(p.lon, p.lat, x + b * dx, y + b * dy)) { hi = b; }
+                    else { lo = a; }
+                }
+                t = (lo + hi) / 2;
+                return Math.min(far(p.lon, p.lat, x + t * dx, y + t * dy),
+                    far(p.lon, p.lat, x, y), far(p.lon, p.lat, x + dx, y + dy));
+            }
+
+            function entrySegments(graph, context, radius) {
+                var work = router(graph), out = [], seen = new Set(), index = context.geometry.index, p = context.point;
+                if (!index || !(radius > 0)) { return out; }
+                // Longitude's scale at the greatest absolute latitude and
+                // latitude's equatorial scale bound the page's scales below.
+                // This rectangle therefore contains every qualifying segment.
+                var c0 = Math.max(0, Math.floor((p.lon - radius / context.sx - index.minLon) / index.dLon));
+                var c1 = Math.min(index.cols - 1, Math.floor((p.lon + radius / context.sx - index.minLon) / index.dLon));
+                var r0 = Math.max(0, Math.floor((p.lat - radius / context.sy - index.minLat) / index.dLat));
+                var r1 = Math.min(index.rows - 1, Math.floor((p.lat + radius / context.sy - index.minLat) / index.dLat));
+                for (var row = r0; row <= r1; row += 1) {
+                    for (var col = c0; col <= c1; col += 1) {
+                        var cell = row * index.cols + col;
+                        for (var k = index.at[cell]; k < index.at[cell + 1]; k += 1) {
+                            var edge = index.item[k], vertex = index.vert[k];
+                            if (seen.has(vertex) || !isFinite(work.cost[edge]) || !work.length[edge]) { continue; }
+                            seen.add(vertex);
+                            if (entrySegment(graph, context, vertex, false) > radius) { continue; }
+                            var nearest = entrySegment(graph, context, vertex, true);
+                            if (nearest <= radius) { out.push({edge: edge, vertex: vertex, nearest: nearest}); }
+                        }
+                    }
+                }
+                return out;
+            }
+
+            function nearestEntryDistance(graph, context) {
+                if (!context.geometry.eligible) { return Infinity; }
+                // Doubling discovers a containing rectangle. Once a point is
+                // found inside it, every closer segment was also considered.
+                var radius = PLAN.indexCellM;
+                for (var step = 0; step < 32; step += 1, radius *= 2) {
+                    var segments = entrySegments(graph, context, radius), nearest = Infinity;
+                    for (var i = 0; i < segments.length; i += 1) { nearest = Math.min(nearest, segments[i].nearest); }
+                    if (isFinite(nearest)) { return nearest; }
+                }
+                throw new Error('nearest network search exhausted its bounded radius expansion');
+            }
+
+            function middleEntries(graph, point, exiting) {
+                var work = router(graph), far = panel().metresBetween, context = entryContext(graph, point), ground = offPath();
+                var radius = nearestEntryDistance(graph, context) + ENTRY_MARGIN;
+                var segments = isFinite(radius) ? entrySegments(graph, context, radius) : [];
+                var byNode = {}, byEdge = {}, landFloor = Infinity, box = kayak() ? dryConnectorBox(graph, point) : null;
+                var off = cheapestMetre(graph);
+                for (var i = 0; i < segments.length; i += 1) {
+                    var edge = segments[i].edge, v = segments[i].vertex;
+                    var rate = (kayak() ? work.land[edge] : work.cost[edge]) / work.length[edge];
+                    var x = graph.coordinates[2 * v], y = graph.coordinates[2 * v + 1];
+                    var dx = graph.coordinates[2 * v + 2] - x, dy = graph.coordinates[2 * v + 3] - y;
+                    var sx = dx * context.x, sy = dy * context.y, span = Math.hypot(sx, sy);
+                    if (!span) { continue; }
+                    var px = (x - point.lon) * context.x, py = (y - point.lat) * context.y;
+                    var foot = -(px * sx + py * sy) / span, gap = Math.abs(px * sy - py * sx) / span, previous = -1;
+                    // cos(theta) = edge / ground gives the dry-ground optimum
+                    // per allowed direction. Water crossings are priced on the
+                    // grid afterwards; their continuous optimum can lie elsewhere.
+                    for (var sign = -1; sign <= 1; sign += 2) {
+                        if (!allowed(graph, edge, exiting ? sign < 0 : sign > 0)) { continue; }
+                        var t = rate < ground ? Math.max(0, Math.min(1,
+                            (foot + sign * gap * rate / Math.sqrt(ground * ground - rate * rate)) / span)) : (sign > 0 ? 1 : 0);
+                        var lon = x + t * dx, lat = y + t * dy, distance = context.geometry.along[v] + far(x, y, lon, lat);
+                        if (distance === previous || distance === 0 || distance === work.length[edge]) { continue; }
+                        previous = distance;
+                        var metres = far(point.lon, point.lat, lon, lat);
+                        var candidate = {lon: lon, lat: lat, edge: edge, vertex: v, along: distance, length: metres,
+                            floor: metres * off, landFloor: box ? connectorBoxLand(graph, point, lon, lat, metres, box) : 0};
+                        landFloor = Math.min(landFloor, candidate.landFloor);
+                        (byEdge[edge] || (byEdge[edge] = [])).push(candidate);
+                        for (var side = 0; side < 2; side += 1) {
+                            if (!allowed(graph, edge, exiting ? side === 0 : side === 1)) { continue; }
+                            var node = side ? graph.toNode[edge] : graph.fromNode[edge];
+                            var partial = side ? work.length[edge] - distance : distance;
+                            (byNode[node] || (byNode[node] = [])).push({node: node, point: candidate,
+                                cost: partial * work.cost[edge] / work.length[edge], land: partial * work.land[edge] / work.length[edge],
+                                cut: {edge: edge, from: distance, to: side ? work.length[edge] : 0}});
+                        }
+                    }
+                }
+                return {byNode: byNode, byEdge: byEdge, landFloor: landFloor};
+            }
+
+            function middlePrice(graph, endpoint, point, leaving, limit, preceding) {
+                if (point.price) { return point.price; }
+                var price = leaving
+                    ? connectorPrice(graph, point.lon, point.lat, endpoint.lon, endpoint.lat, limit, preceding, {length: point.length, dry: 0})
+                    : connectorPrice(graph, endpoint.lon, endpoint.lat, point.lon, point.lat, limit, preceding, {length: point.length, dry: 0});
+                // A rejection depends on this suffix's bound; it cannot reject
+                // the same connector with a cheaper suffix later in the search.
+                if (isFinite(price.cost)) { point.price = price; }
+                return price;
+            }
+
+            // The route between two interior points need not visit a real node.
+            // Ordered sweeps compare every legal pair on an edge in linear time:
+            // subtract the entry's position, then add the exit's position.
+            function middleDirect(graph, from, to, entries, exits, leastLand, cheapest) {
+                var work = router(graph), found = null;
+                for (var edge of (entries ? Object.keys(entries.byEdge).map(Number) : (from.edge >= 0 ? [from.edge] : []))) {
+                    var starts = entries ? entries.byEdge[edge] : (from.edge === edge ? [from] : null);
+                    var ends = exits ? exits.byEdge[edge] : (to.edge === edge ? [to] : null);
+                    if (!starts || !starts.length || !ends || !ends.length) { continue; }
+                    var ordered = starts.map(function (point) { return {point: point, start: true}; })
+                        .concat(ends.map(function (point) { return {point: point, start: false}; }));
+                    var rate = work.cost[edge] / work.length[edge], landRate = work.land[edge] / work.length[edge];
+                    for (var sign = -1; sign <= 1; sign += 2) {
+                        if (!allowed(graph, edge, sign > 0)) { continue; }
+                        ordered.sort(function (a, b) { return sign * (a.point.along - b.point.along) || Number(b.start) - Number(a.start); });
+                        var best = null, bestCost = Infinity, bestLand = Infinity;
+                        for (var step = 0; step < ordered.length; step += 1) {
+                            var item = ordered[step], point = item.point;
+                            var connected = item.start ? entries : exits;
+                            if (connected && !cheaper(point.landFloor, point.floor, leastLand, cheapest)) { continue; }
+                            var price = connected ? middlePrice(graph, item.start ? from : to, point, !item.start,
+                                kayak() ? leastLand : undefined, 0) : {land: 0, cost: 0};
+                            if (!isFinite(price.cost)) { continue; }
+                            if (item.start) {
+                                var land = price.land - sign * point.along * landRate, cost = price.cost - sign * point.along * rate;
+                                if (cheaper(land, cost, bestLand, bestCost)) { best = point; bestLand = land; bestCost = cost; }
+                            } else if (best) {
+                                // Sum physical pieces in the same order as the
+                                // other search, avoiding cancellation in the label.
+                                var firstPrice = entries ? best.price : {land: 0, cost: 0};
+                                var partial = Math.abs(point.along - best.along);
+                                var wholeLand = firstPrice.land + partial * landRate + price.land;
+                                var wholeCost = firstPrice.cost + partial * rate + price.cost;
+                                if (cheaper(wholeLand, wholeCost, leastLand, cheapest)) {
+                                    leastLand = wholeLand; cheapest = wholeCost;
+                                    found = {head: -1, tail: -1, over: null, land: wholeLand, cost: wholeCost,
+                                        headPoint: entries ? best : null, tailPoint: exits ? point : null,
+                                        headCut: {edge: edge, from: best.along, to: point.along}, tailCut: null, middleOnly: true};
+                                }
+                            }
+                        }
+                    }
+                }
+                return found;
+            }
+
             // ---- a way to somewhere that is not on the network ----------------
             // **A layer of connectors over the graph, and not a point moved on
             // to it.** Reported from the phone: a goal with stops on the way
@@ -470,9 +668,9 @@
             // readings a leg could have stop being three cases: walking
             // straight is the direct connector winning, a routed leg is two
             // connectors with the network between them, and *most of the way is
-            // a path* is the same thing with one long connector on the end. No
-            // threshold and no reach anywhere in it, because the comparison is
-            // the rule.
+            // a path* is the same thing with one long connector on the end.
+            // Nodes remain available everywhere. Phase 11 adds interior points
+            // within d + ENTRY_MARGIN; the same prices choose among them.
             //
             // **One entry and one exit**, which is what makes this a walk to
             // the network rather than a shortcut across it: a route free to
@@ -579,7 +777,7 @@
                 // heap -- and no node is seeded with a walk over the ground: a
                 // point on a line is reached along the line, which is the
                 // whole of what a tap in the middle of a long trail means.
-                var tailCuts = {};
+                var tailCuts = {}, tailPoints = {};
                 var toEnds = endsOf(graph, to, true);
                 for (i = 0; i < toEnds.length; i += 1) {
                     if (!cheaper(toEnds[i].land, toEnds[i].cost, plainLand, plain) ||
@@ -590,12 +788,19 @@
                 }
                 var head = -1, headCut = null, cheapest = plain, leastLand = plainLand, prefixSamples = 16;
                 var fromEnds = endsOf(graph, from);
+                var middleIn = fromEnds.length ? null : middleEntries(graph, from, false);
+                var middleOut = toEnds.length ? null : middleEntries(graph, to, true);
+                var headPoint = null;
                 var entryBox = kayak() && !fromEnds.length ? dryConnectorBox(graph, from) : null, entryLand = 0;
-                // Every network way needs an entry connector. A dry box around
-                // the tap bounds all of them without sampling every long line.
-                // Add only their smallest land floor to a suffix's bound.
+                // Every way through a node needs one of these entry connectors.
+                // connectorBoxLand counts only grid midpoints inside the dry
+                // box, so each value is a floor on that exact connector. The
+                // minimum over all nodes and the enumerated interior points
+                // therefore bounds every entry in the d + 250 m set. Partial
+                // edges add nonnegative land; same-edge pieces are checked
+                // separately and do not depend on this search bound.
                 if (entryBox) {
-                    entryLand = Infinity;
+                    entryLand = middleIn ? middleIn.landFloor : Infinity;
                     for (i = 0; i < nodes; i += 1) {
                         var entryLength = far(from.lon, from.lat, graph.nodeLon[i], graph.nodeLat[i]);
                         entryLand = Math.min(entryLand, connectorBoxLand(graph, from, graph.nodeLon[i], graph.nodeLat[i], entryLength, entryBox));
@@ -643,6 +848,29 @@
                 }
                 var entryBounds = kayak() && fromEnds.length && leastLand > 0 ? entryLandFloors(graph, fromEnds, leastLand) : null;
                 var eager = kayak() && leastLand > 0 && (!connectorWaterAt(graph, from.lon, from.lat) || !connectorWaterAt(graph, to.lon, to.lat));
+                // Each interior exit is an exact seed at both permitted ends
+                // of its edge. Its ground connector is shared by those seeds.
+                var exitNodes = middleOut ? Object.keys(middleOut.byNode) : [];
+                for (var en = 0; en < exitNodes.length; en += 1) {
+                    i = Number(exitNodes[en]);
+                    var exits = middleOut.byNode[i];
+                    for (var exit = 0; exit < exits.length; exit += 1) {
+                        var attachment = exits[exit], candidate = attachment.point;
+                        var requiredEntry = entryBounds ? Math.max(entryLand, entryBounds[i] - 1) : entryLand;
+                        var lowerLand = attachment.land + candidate.landFloor;
+                        var lowerCost = attachment.cost + candidate.floor;
+                        if (!cheaper(lowerLand + requiredEntry, lowerCost, leastLand, cheapest) ||
+                                !cheaper(lowerLand, lowerCost, bestLand[i], best[i])) { continue; }
+                        var connector = middlePrice(graph, to, candidate, true,
+                            kayak() ? Math.min(bestLand[i], leastLand - requiredEntry) : undefined, attachment.land);
+                        var exitLand = attachment.land + connector.land, exitCost = attachment.cost + connector.cost;
+                        if (cheaper(exitLand, exitCost, bestLand[i], best[i])) {
+                            bestLand[i] = exitLand; best[i] = exitCost;
+                            tailCuts[i] = flipCut(attachment.cut); tailPoints[i] = candidate;
+                        }
+                    }
+                    if (isFinite(best[i])) { heap.push(i, best[i], bestLand[i]); }
+                }
                 for (i = 0; i < nodes && !toEnds.length; i += 1) {
                     if (entryBounds && entryBounds[i] > leastLand) { continue; }
                     var leaveM = far(graph.nodeLon[i], graph.nodeLat[i], to.lon, to.lat), leave = leaveM * off;
@@ -662,7 +890,7 @@
                             localBound ? bestLand[i] : leastLand, localBound ? 0 : requiredIn,
                             {length: leaveM, dry: 0});
                         if (cheaper(exact.land, exact.cost, bestLand[i], best[i])) {
-                            best[i] = exact.cost; bestLand[i] = exact.land;
+                            best[i] = exact.cost; bestLand[i] = exact.land; tailCuts[i] = null; tailPoints[i] = null;
                             heap.push(i, exact.cost, exact.land);
                         }
                         continue;
@@ -698,7 +926,21 @@
                     var entry = connectorPrice(graph, from.lon, from.lat, graph.nodeLon[node], graph.nodeLat[node],
                         leastLand, land, {length: entryM, dry: 0});
                     if (cheaper(land + entry.land, cost + entry.cost, leastLand, cheapest)) {
-                        leastLand = land + entry.land; cheapest = cost + entry.cost; head = node;
+                        leastLand = land + entry.land; cheapest = cost + entry.cost; head = node; headCut = null; headPoint = null;
+                    }
+                }
+                function enterMiddle(node, cost, land) {
+                    var attachments = middleIn && middleIn.byNode[node];
+                    if (!attachments) { return; }
+                    for (var k = 0; k < attachments.length; k += 1) {
+                        var attachment = attachments[k], point = attachment.point;
+                        var partialLand = land + attachment.land, partialCost = cost + attachment.cost;
+                        if (!cheaper(partialLand + point.landFloor, partialCost + point.floor, leastLand, cheapest)) { continue; }
+                        var price = middlePrice(graph, from, point, false, kayak() ? leastLand : undefined, partialLand);
+                        if (cheaper(partialLand + price.land, partialCost + price.cost, leastLand, cheapest)) {
+                            leastLand = partialLand + price.land; cheapest = partialCost + price.cost;
+                            head = node; headCut = attachment.cut; headPoint = point;
+                        }
                     }
                 }
                 // Bounded and thrown for, as every loop over this graph is: a
@@ -707,7 +949,7 @@
                 // plus one per arc. A defect that runs for ever in a page is
                 // indistinguishable from a page that has hung.
                 // One pop per floor, one per seed priced, one per arc relaxed.
-                var pops = 0, mostPops = 2 * nodes + 2 * graph.header.edges + 1;
+                var pops = 0, mostPops = 3 * nodes + 2 * graph.header.edges + 1;
                 while (floors.node.length || heap.node.length) {
                     pops += 1;
                     if (pops > mostPops) { throw new Error('the search took more than ' + mostPops + ' steps'); }
@@ -749,6 +991,7 @@
                         // any relaxation does.
                         if (cheaper(truly.land, truly.cost, bestLand[seed.node], best[seed.node])) {
                             best[seed.node] = truly.cost; bestLand[seed.node] = truly.land; viaEdge[seed.node] = -1; viaNode[seed.node] = -1;
+                            tailCuts[seed.node] = null; tailPoints[seed.node] = null;
                             heap.push(seed.node, truly.cost, truly.land);
                         }
                         continue;
@@ -756,7 +999,7 @@
                     var taken = heap.pop();
                     if (cheaper(bestLand[taken.node], best[taken.node], taken.land, taken.cost)) { continue; }
                     if (entryBounds && !cheaper(entryBounds[taken.node] + Math.floor(taken.land), taken.cost, leastLand, cheapest)) { continue; }
-                    if (kayak()) { enter(taken.node, taken.cost, taken.land); }
+                    if (kayak()) { enter(taken.node, taken.cost, taken.land); enterMiddle(taken.node, taken.cost, taken.land); }
                     for (var a = work.at[taken.node]; a < work.at[taken.node + 1]; a += 1) {
                         var edge = work.arc[a];
                         if (!allowed(graph, edge, graph.toNode[edge] === taken.node)) { continue; }
@@ -790,10 +1033,20 @@
                     var whole = entry.cost + best[next.node], wholeLand = entry.land + bestLand[next.node];
                     if (cheaper(wholeLand, whole, leastLand, cheapest)) { cheapest = whole; leastLand = wholeLand; head = next.node; }
                 }
+                if (!kayak() && middleIn) {
+                    var entryNodes = Object.keys(middleIn.byNode);
+                    for (var ei = 0; ei < entryNodes.length; ei += 1) {
+                        i = Number(entryNodes[ei]);
+                        if (isFinite(best[i])) { enterMiddle(i, best[i], bestLand[i]); }
+                    }
+                }
+                var sameEdge = middleIn || middleOut ? middleDirect(graph, from, to, middleIn, middleOut, leastLand, cheapest) : null;
+                if (sameEdge) { return sameEdge; }
                 if (head < 0) { return null; }
                 var joined = leavingAt(graph, head);
-                joined.headCut = headCut;
-                joined.tailCut = tailCuts[joined.tail] || null;
+                joined.headCut = headCut; joined.headPoint = headPoint;
+                joined.land = leastLand; joined.cost = cheapest;
+                joined.tailCut = tailCuts[joined.tail] || null; joined.tailPoint = tailPoints[joined.tail] || null;
                 return joined;
             }
 
@@ -968,6 +1221,12 @@
                 var ground = offPath() * (kayak() ? PLAN.portageFactor : 1);
                 var waterPrice = kayak() ? openWaterFactor(graph) : PLAN.waterFactor;
                 if (!grid || (!kayak() && !(waterPrice > ground))) { return {cost: length * ground, land: kayak() ? length * offPath() : 0}; }
+                if (!kayak() && grid.bits && grid.spec) {
+                    var count = Math.max(1, Math.ceil(length / grid.cellM));
+                    var wetCount = connectorScan({water: grid}, aLon, aLat, bLon, bLat, count, 0, count, 1, length, undefined, undefined, 0);
+                    var wetLength = length * wetCount / count;
+                    return {cost: (length - wetLength) * ground + wetLength * waterPrice, land: 0};
+                }
                 var pieces = Math.max(1, Math.ceil(length / grid.cellM)), wet = 0, backwards = false;
                 for (var i = known ? known.dry : 0; i < pieces; i += 1) {
                     // A dry first sample makes this end useful for reaching
@@ -2560,12 +2819,38 @@
                 // the piece of it between the point and the node -- path, and
                 // drawn as path. Only an end off the network walks over the
                 // ground to reach it.
-                function pieceOf(cut) {
+                function piece(cut, first, last) {
                     var part = cutPart(graph, cut);
+                    // The metre scale varies along a segment. Keeping the
+                    // priced coordinate gives the connector and cut exactly
+                    // the same joining vertex.
+                    if (part && first) { part.lon[0] = first.lon; part.lat[0] = first.lat; }
+                    if (part && last) { part.lon[part.lon.length - 1] = last.lon; part.lat[part.lat.length - 1] = last.lat; }
+                    return part;
+                }
+                function pieceOf(cut, first, last) {
+                    var part = piece(cut, first, last);
                     return Promise.resolve(part ? [part] : []);
                 }
-                return Promise.all([joined.headCut ? pieceOf(joined.headCut) : walkTo(graph, from, enter, mayAsk),
-                                    joined.tailCut ? pieceOf(joined.tailCut) : walkTo(graph, leave, to, mayAsk)])
+                if (joined.middleOnly) {
+                    return Promise.all([joined.headPoint ? walkTo(graph, from, joined.headPoint, mayAsk) : Promise.resolve([]),
+                                        pieceOf(joined.headCut, joined.headPoint, joined.tailPoint),
+                                        joined.tailPoint ? walkTo(graph, joined.tailPoint, to, mayAsk) : Promise.resolve([])])
+                        .then(function (parts) { return parts[0].concat(parts[1], parts[2]); });
+                }
+                function entryParts() {
+                    if (!joined.headPoint) { return joined.headCut ? pieceOf(joined.headCut) : walkTo(graph, from, enter, mayAsk); }
+                    return walkTo(graph, from, joined.headPoint, mayAsk).then(function (parts) {
+                        var cut = piece(joined.headCut, joined.headPoint, null); return cut ? parts.concat([cut]) : parts;
+                    });
+                }
+                function exitParts() {
+                    if (!joined.tailPoint) { return joined.tailCut ? pieceOf(joined.tailCut) : walkTo(graph, leave, to, mayAsk); }
+                    return walkTo(graph, joined.tailPoint, to, mayAsk).then(function (parts) {
+                        var cut = piece(joined.tailCut, null, joined.tailPoint); return cut ? [cut].concat(parts) : parts;
+                    });
+                }
+                return Promise.all([entryParts(), exitParts()])
                     .then(function (ends) { return ends[0].concat(middle, ends[1]); });
             }
 

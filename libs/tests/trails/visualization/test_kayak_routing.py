@@ -28,6 +28,14 @@ def readings():
         "flipCut",
         "routeBetween",
         "joinedRoute",
+        "entryGeometry",
+        "entryContext",
+        "entrySegment",
+        "entrySegments",
+        "nearestEntryDistance",
+        "middleEntries",
+        "middlePrice",
+        "middleDirect",
         "leavingAt",
         "priced",
         "connectorPrice",
@@ -66,6 +74,7 @@ def readings():
         function refresh() { refreshes++; }
         function refreshGoal() {}
         var CROSSING = 'ferry', CONNECTOR = 'bridge', PADDLE = 'paddle', PORTAGE = 'portage', LAUNCH = 'launch', NODE_FIRST_M = 2;
+        var ENTRY_MARGIN = 250;
         var PLAN = {portageFactor:4, offPathFactor:3, waterFactor:30, indexCellM:100, snapM:150, maxStraightM:50000};
         var MARKING = ['marked', 'unmarked', 'unknown'];
         var TALLIED = MARKING.concat(['undrawn', 'recorded', 'unrecorded']);
@@ -164,7 +173,7 @@ def readings():
         }
 
         function alternatives(sources, edges, positions) {
-            routing = null;
+            routing = null; gridded = null;
             return {header:{edges:edges.length,nodes:positions.length,chains:edges.length,sources},
                 coordinates:new Float64Array(edges.flatMap(e=>[...positions[e[0]],...positions[e[1]]])),
                 vertexAt:Array.from({length:edges.length+1},(_,i)=>2*i),
@@ -334,6 +343,7 @@ def readings():
         // Scalar midpoint prices check uniform-square skips independently, including
         // partial grid boundaries, reversed lines and reused dry prefixes.
         out.connectorRuns={checked:0,failures:[]};
+        out.walkingRuns={checked:0,wetMismatches:0,maxPriceDifference:0};
         seed=20260923;
         for(let terrain=0;terrain<7;terrain++) {
             const spec={west:0.02,south:0.03,dLon:0.00001,dLat:0.000015,cols:63,rows:49};
@@ -368,6 +378,18 @@ def readings():
                     out.connectorRuns.failures.push({terrain,pair,from:[ax,ay],to:[bx,by],expected,actual,equal,limited,dry});
                 }
                 out.connectorRuns.checked++;
+                paddling=false;
+                let wet=0;
+                for(let sample=0;sample<pieces;sample++) {
+                    const t=(sample+.5)/pieces;
+                    if(g.waterAt(ax+t*(bx-ax),ay+t*(by-ay)))wet++;
+                }
+                const batched=connectorScan({water:g.water},ax,ay,bx,by,pieces,0,pieces,1,length,undefined,undefined,0);
+                if(batched!==wet)out.walkingRuns.wetMismatches++;
+                out.walkingRuns.maxPriceDifference=Math.max(out.walkingRuns.maxPriceDifference,
+                    Math.abs(connectorPrice(g,ax,ay,bx,by).cost-referenceConnectorPrice(g,ax,ay,bx,by).cost));
+                out.walkingRuns.checked++;
+                paddling=true;
             }
         }
         paddling=false;
@@ -376,6 +398,20 @@ def readings():
         const blocked=connectorPrice(g,ax,ay,bx,by);
         g.damAt=()=>false;
         out.walkingDams={blocked,clear:connectorPrice(g,ax,ay,bx,by)};
+        out.middleWalking=[];
+        for(const height of [8,400])for(const paths of [false,true]) {
+            paddling=false; stayingOnPaths=paths;
+            g=alternatives([{name:'road',kind:'path',factor:1.3}],[[0,1,0]],[[0,0],[0.02,0]]);
+            g.water=null;
+            const from={node:-1,lon:0.004,lat:height/100000},to={node:-1,lon:0.018,lat:height/100000};
+            const chosen=joinedRoute(g,from,to),expected=referenceJoined(g,from,to);
+            out.middleWalking.push({height,paths,nearest:nearestEntryDistance(g,entryContext(g,from)),
+                chosen,expected,direct:connectorPrice(g,from.lon,from.lat,to.lon,to.lat)});
+        }
+        g=alternatives([{name:'road',kind:'path',factor:1.3}],[[0,1,0],[1,2,0]],[[0,0],[0.02,0],[0.02,0.02]]);
+        g.water=null; g.oneWay=[1,1];
+        const beside={node:-1,lon:0.01,lat:0.00008},beyond={node:-1,lon:0.02008,lat:0.01};
+        out.meetingEdges={chosen:joinedRoute(g,beside,beyond),expected:referenceJoined(g,beside,beyond)};
         console.log(JSON.stringify(out));
     """
     )
@@ -389,6 +425,25 @@ def test_both_searches_obey_journey_direction(readings):
     assert readings["joinedForward"]["over"]["edges"] == [0]
     assert readings["reverse"] is None
     assert readings["joinedReverse"] is None
+
+
+def test_walking_enters_and_exits_a_road_between_nodes_even_beyond_250_metres(readings):
+    for row in readings["middleWalking"]:
+        chosen = row["chosen"]
+        assert row["nearest"] == pytest.approx(row["height"])
+        assert chosen["middleOnly"] is True
+        assert 0 < chosen["headCut"]["from"] < chosen["headCut"]["to"] < 2000
+        assert chosen["headPoint"]["lat"] == chosen["tailPoint"]["lat"] == 0
+        assert chosen["cost"] == pytest.approx(row["expected"]["cost"], abs=1e-8)
+        assert chosen["cost"] < row["direct"]["cost"]
+
+
+def test_interior_pieces_meet_at_a_junction_in_the_permitted_direction(readings):
+    chosen = readings["meetingEdges"]["chosen"]
+    assert chosen["head"] == chosen["tail"] == 1
+    assert chosen["headCut"]["edge"] == 0
+    assert chosen["tailCut"]["edge"] == 1
+    assert chosen["cost"] == pytest.approx(readings["meetingEdges"]["expected"]["cost"], abs=1e-8)
 
 
 def test_paddling_counts_its_source_and_protection_without_waymarking(readings):
@@ -557,6 +612,10 @@ def test_uniform_squares_preserve_scalar_midpoint_prices(readings):
     assert readings["connectorRuns"]["failures"] == []
 
 
+def test_walking_batches_count_the_same_midpoints_without_dam_discs(readings):
+    assert readings["walkingRuns"] == {"checked": 7000, "wetMismatches": 0, "maxPriceDifference": 0}
+
+
 def test_dam_discs_do_not_change_walking_prices(readings):
     assert readings["walkingDams"]["blocked"] == readings["walkingDams"]["clear"]
 
@@ -590,3 +649,112 @@ def test_launches_keep_path_price_in_both_objectives_and_switch_settings(reading
         assert row["cost"] == row["length"]
         assert row["route"]["land"] == row["length"]
         assert row["allowed"] is True
+
+
+def test_kloten_interior_entries_match_the_virtual_table_and_attached_rows_stay_put():
+    """Replay measured Kloten geometry and prices without a page or cached nationwide inputs."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is needed to execute the routing checks")
+    source = files("trails.visualization").joinpath("js", "plan_mode.js").read_text()
+    names = (
+        "router",
+        "allowed",
+        "endsOf",
+        "flipCut",
+        "routeBetween",
+        "joinedRoute",
+        "leavingAt",
+        "connectorPrice",
+        "connectorWaterAt",
+        "connectorRadii",
+        "connectorScan",
+        "entryLandFloors",
+        "connectorRunPrice",
+        "connectorDryPrefix",
+        "dryConnectorBox",
+        "connectorBoxLand",
+        "cheaper",
+        "worthRouting",
+        "cheapestMetre",
+        "openWaterFactor",
+        "edgeIndex",
+        "entryGeometry",
+        "entryContext",
+        "entrySegment",
+        "entrySegments",
+        "nearestEntryDistance",
+        "middleEntries",
+        "middlePrice",
+        "middleDirect",
+    )
+    functions = []
+    for name in names:
+        match = re.search(rf"^            function {name}\([^\n]*\) \{{(?:[^\n]*\}}$|.*?^            \}})", source, re.M | re.S)
+        assert match is not None, name
+        functions.append(match[0])
+    heap = source[source.index("            function Heap()") : source.index("            // Dijkstra over the weighted graph")]
+    fixture = Path(__file__).with_name("kloten_phase11.json").read_text()
+    script = (
+        "const fixture="
+        + fixture
+        + ";\n"
+        + r"""
+        var routing=null, gridded=null, stayingOnPaths=false, ENTRY_MARGIN=250, PLAN=fixture.plan;
+        var CROSSING='ferry',CONNECTOR='bridge',PADDLE='paddle',PORTAGE='portage',LAUNCH='launch';
+        function kayak(){return true;}
+        function offPath(){return stayingOnPaths?10:PLAN.offPathFactor;}
+        function metres(x,y,a,b){
+            const phi=(y+b)*Math.PI/360;
+            const sy=111132.92-559.82*Math.cos(2*phi)+1.175*Math.cos(4*phi)-.0023*Math.cos(6*phi);
+            const sx=111412.84*Math.cos(phi)-93.5*Math.cos(3*phi)+.118*Math.cos(5*phi);
+            return Math.sqrt(((a-x)*sx)**2+((b-y)*sy)**2);
+        }
+        function panel(){return {metresBetween:metres};}
+    """
+        + "\n".join(functions)
+        + heap
+        + r"""
+        const g=fixture.graph, crop=fixture.crop, wet=new Set(crop.wet), spec=g.water.spec;
+        g.waterAt=(lon,lat)=>{
+            const x=Math.floor((lon-spec.west)/spec.dLon)-crop.col,y=Math.floor((lat-spec.south)/spec.dLat)-crop.row;
+            if(x<0||y<0||x>=crop.cols||y>=crop.rows)throw Error('connector left the measured water crop');
+            return wet.has(y*crop.cols+x);
+        };
+        const dams=g.header.dams.map(p=>{
+            const phi=p[1]*Math.PI/180;
+            return [...p,111412.84*Math.cos(phi)-93.5*Math.cos(3*phi)+.118*Math.cos(5*phi),
+                111132.92-559.82*Math.cos(2*phi)+1.175*Math.cos(4*phi)-.0023*Math.cos(6*phi)];
+        });
+        g.damAt=(x,y)=>dams.some(p=>((x-p[0])*p[2])**2+((y-p[1])*p[3])**2<=g.header.damRadiusM**2);
+        const rows=[];
+        for(const c of fixture.cases){
+            stayingOnPaths=c.case.stay;routing=null;
+            const j=c.attached?routeBetween(g,c.from,c.to):joinedRoute(g,c.from,c.to),w=router(g);
+            if(!j)throw Error('Kloten route disappeared');
+            if(c.attached&&!worthRouting(g,c.from,c.to,j.cost,j.land))throw Error('attached whole-leg fallback changed');
+            let carry=0;
+            const add=(e,m)=>{if(![PADDLE,CROSSING].includes(g.header.sources[g.sources[e]].kind))carry+=m;};
+            const cuts=c.attached?[j.head,j.tail]:[j.headCut,j.tailCut];
+            for(const cut of cuts)if(cut)add(cut.edge,Math.abs(cut.to-cut.from));
+            for(const e of (c.attached?j.edges:j.over?.edges||[]))add(e,w.length[e]);
+            if(j.headPoint)carry+=connectorPrice(g,c.from.lon,c.from.lat,j.headPoint.lon,j.headPoint.lat).land/offPath();
+            if(j.tailPoint)carry+=connectorPrice(g,j.tailPoint.lon,j.tailPoint.lat,c.to.lon,c.to.lat).land/offPath();
+            rows.push({case:c.case,attached:c.attached,land:j.land,cost:j.cost,carry,expected:c.expected,
+                northern:(c.attached?j.edges:j.over?.edges||[]).some(e=>fixture.originalEdges[e]===284183)});
+        }
+        console.log(JSON.stringify(rows));
+    """
+    )
+    result = subprocess.run([node, "-"], input=script, text=True, capture_output=True, timeout=60)
+    assert result.returncode == 0, result.stderr
+    rows = json.loads(result.stdout)
+    assert sum(row["attached"] for row in rows) == 24
+    assert sum(not row["attached"] for row in rows) == 24
+    for row in rows:
+        assert row["northern"], row["case"]
+        assert row["land"] == pytest.approx(row["expected"]["land"], abs=1e-8, rel=1e-12), row["case"]
+        assert row["cost"] == pytest.approx(row["expected"]["cost"], abs=1e-8, rel=1e-12), row["case"]
+        # The analytic construction and the earlier refined virtual point
+        # differ by at most 0.000029 m across the 24 measured off-network rows.
+        assert row["carry"] == pytest.approx(row["expected"]["carry"], abs=0.000029, rel=1e-12), row["case"]

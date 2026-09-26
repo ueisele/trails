@@ -102,6 +102,10 @@ would draw it without a change.
 
 ## 5. Changes
 
+- 2026-09-26 — phase 11 is built: local d + 250 m interior entries and exits in all four settings, as Uwe approved, with exact walking midpoint batching. All 2,928 references and twelve speed gates pass; Norway walking p95 falls 64.7%. The graphs and stored-plan restoration stay unchanged; distant exits remain unscheduled atlas work.
+
+- 2026-09-25 — Uwe answers "Ja" to phase 11's d + 250 m interior entries and exits in walking and kayak, both switch settings, after the radius study. Walking scope is now Uwe's decision too. All node candidates stay; audited walking midpoint batching is approved. Arbitrary distant exits remain unscheduled atlas work.
+
 - 2026-09-25 — phase 11 stops again after review requests lazy candidate discovery: Abisko kayak p95 rises 338.30 → 1,671.20 ms (4.940×). All 105,690 usable edges still expand on the five slowest pairs. The first prototype's 3.245× stop remains history below. Uwe's entry request, review's walking scope, the candidate set and speed gate stand; only records change, with both prototypes in scratch.
 
 - 2026-09-25 — phase 10 is built: kayak land price follows walking, ground follows Stay on paths at 3 / 10, and 4,395 path-priced launches join nearby roads to shore. Uwe accepts the shared road noding. The compact line counts the whole way with its split. All 2,400 kayak/walking labels match in both settings; the largest kayak p95 increase is 52%. The measurements and build note are below.
@@ -173,13 +177,16 @@ would it cost to allow arbitrary entries into a road?"* Then: *"Yes, let's do
 the entries first."* The offset line waits. The source investigation is
 `~/mockups/kayak-mode/kloten-start/report.md`, its phase-10 follow-up.
 
-**Review's decision, not Uwe's:** apply the same rule to walking with Stay on
-paths off and on. Keep the objectives, factors, snapping, grid, attached
-endpoints and whole-leg fallback. Each existing node remains a candidate;
-each usable segment also offers its clamped dry-ground optimum in every
-allowed direction. With the perpendicular foot `s₀`, gap `d`, edge rate `f`
+**Scope approved by Uwe, 2026-09-25:** review initially proposed applying
+one rule to walking and kayak. After the radius study Uwe answers **"Ja"**
+to interior entries and exits within **d + 250 m**, where `d` is each
+endpoint's nearest eligible network distance, in all four settings. Walking
+scope is now his decision too. Keep objectives, factors, snapping, grid,
+attached endpoints and whole-leg fallback. Each existing node remains a
+candidate everywhere; each segment within the radius offers its clamped
+dry-ground optimum in every allowed direction. With the perpendicular foot `s₀`, gap `h`, edge rate `f`
 and ground rate `g`, `cos θ = f/g` gives
-`s = s₀ ± d × f / sqrt(g² − f²)`; `f ≥ g` selects a segment end. Exact
+`s = s₀ ± h × f / sqrt(g² − f²)`; `f ≥ g` selects a segment end. Exact
 `connectorPrice` sampling then prices each candidate, including water and
 kayak dam discs. The dry optimum may miss a slightly better point when its
 connector crosses water. Exits mirror entries, including two middle points
@@ -243,6 +250,25 @@ walking wet-count audit, pinned regressions, display/export checks, builds
 and drives remain pending the speed gate. No built note can yet report a
 passing phase. Review must address the remaining candidate-discovery cost;
 no change to the candidate set, objective or speed gate is proposed.
+
+**Built 2026-09-26.** Uwe's **"Ja"** approves d + 250 m at both free
+endpoints in all four settings and the audited walking batching. The local
+implementation passes **2,400 frozen phase-10 + 528 radius comparisons**;
+the largest price difference is **5.82×10⁻¹¹**. Every speed gate passes:
+Lomsdal-Visten walking p95 is **10.898 → 3.845 s**, **64.7% lower**. The
+24 free Kloten rows match the virtual table within **0.000029 m** carry,
+and the 24 attached rows stay unchanged. E8/off reads **231.360461 m** carry
+at **313.813413** land price through the northern launch. Both walking
+settings change only for cheaper answers; **421/1,200** phase-10 cases
+change by more than 0.01 cost. The [measurements](kayak-mode-phase11-measurements.md#local-entries-after-uwes-decision)
+record all map/settings, the profile, display/export readings and changed
+scene figures. All three rebuilt graphs remain byte-identical. Selected
+checks are green twice per page; drive-all is green on all three pages
+(**1,638 / 1,644 / 1,793 readings** for Abisko / Lomsdal-Visten / Kloten).
+Stored-plan restoration is unchanged. `command make hooks-run` passes with
+network, including both test suites.
+Distant mid-edge exits beyond the radius are deferred to the atlas design,
+not scheduled here. The two speed stops above remain prototype history.
 
 ### Phase 10 — Carry on paths, launch at road ends, 2026-09-25
 

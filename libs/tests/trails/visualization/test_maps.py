@@ -7159,7 +7159,7 @@ class TestPlanMode:
         assert "var toEnds = endsOf(graph, to, true);" in planning
         assert "for (i = 0; i < nodes && !toEnds.length; i += 1) {" in planning
         assert "joined.tailCut = tailCuts[joined.tail] || null;" in planning
-        assert "joined.headCut ? pieceOf(joined.headCut) : walkTo(graph, from, enter, mayAsk)," in planning
+        assert "if (!joined.headPoint) { return joined.headCut ? pieceOf(joined.headCut) : walkTo(graph, from, enter, mayAsk); }" in planning
         # A goal's leg asks once, at the same spot, whether its ends stand on
         # the line: a tap was put there, a hut from a popup was not.
         assert "return resolve(graph, placed(graph, head), placed(graph, tail), true, true);" in planning
@@ -7361,9 +7361,9 @@ class TestPlanMode:
         assert "var head = -1, headCut = null, cheapest = plain, leastLand = plainLand, prefixSamples = 16;" in planning
         assert "var floor = far(graph.nodeLon[i], graph.nodeLat[i], from.lon, from.lat) * off + best[i];" in planning
         assert "var whole = entry.cost + best[next.node], wholeLand = entry.land + bestLand[next.node];" in planning
-        # Bounded like every other loop over this graph, with room for each
-        # seed to come back once at its true price.
-        assert "var pops = 0, mostPops = 2 * nodes + 2 * graph.header.edges + 1;" in planning
+        # Local interior exits add one exact seed per end node alongside
+        # the old node floors and their repriced labels.
+        assert "var pops = 0, mostPops = 3 * nodes + 2 * graph.header.edges + 1;" in planning
         # And the way out read off the same search, forwards.
         assert "function leavingAt(graph, head) {" in planning
         assert "while (work.viaEdge[walk] >= 0) {" in planning

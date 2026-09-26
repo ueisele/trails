@@ -1510,18 +1510,22 @@ from its northern node along the road. The temporary entry goes north in all
 24 distinct off-network cases. This is an entry-set limitation, not a price
 or pruning defect on those inputs.
 
-**Review's decision, not Uwe's.** The same entries apply to walking with
-Stay on paths off and on. A separate walking rule would give one network two
-models of entry. Walking changes are accepted when the new candidate is
-strictly cheaper under its unchanged objective, and must be reported.
+**Scope approved by Uwe, 2026-09-25.** Review initially extended the entry
+rule to walking to avoid two models of one network. After the radius study,
+Uwe answered **"Ja"** to d + 250 m for both endpoints, in walking and kayak,
+with either switch setting. Walking scope is now his decision too. Changes
+are accepted only for a strictly cheaper answer under the unchanged objective,
+and must be reported.
 
-**The rule.** An off-network endpoint may enter any usable edge between
-consecutive geometry vertices and leave in each direction `allowed` permits;
-an off-network target has the mirrored exits. Keep all existing node
-candidates. For each segment and allowed direction add the clamped dry-ground
-optimum. With edge rate `f`, ground rate `g`, perpendicular foot `s₀` and gap
-`d`, it satisfies `cos θ = f / g`:
-`s = s₀ ± d × f / sqrt(g² − f²)`. If `f ≥ g`, use a segment end. These are
+**The rule, local after Uwe's radius decision.** For each off-network endpoint,
+let `d` be its distance to the nearest eligible network point in the current
+mode. Offer interior candidates on every segment whose nearest point lies
+within **d + 250 m**, at starts and targets alike. Keep all existing node
+candidates everywhere. An entry may leave in each direction `allowed` permits;
+exits mirror it. For each eligible segment and allowed direction add the
+clamped dry-ground optimum. With edge rate `f`, ground rate `g`, perpendicular foot `s₀` and gap
+`h`, it satisfies `cos θ = f / g`:
+`s = s₀ ± h × f / sqrt(g² − f²)`. If `f ≥ g`, use a segment end. These are
 rates of the minimised objective: land price in a kayak, cost when walking.
 Each candidate is priced exactly by the existing `connectorPrice` and its
 25 m grid, including kayak dam discs. The analytic point is the **dry-ground
@@ -1535,21 +1539,30 @@ strict improvements may replace old answers. Draw and export the connector
 and partial edge, including both in the panel's total and paddle/foot split.
 Stored-plan restoration stays as it is; the measurement file explains it.
 
-**Validation required.** Preserve the phase-10 sample and add a second,
-documented off-network sample, using seed 20260923. The new sample needs
-2,400 comparisons against independent unpruned references: 200 pairs per
-map in kayak, kayak-paths, walking and paths. Report before/after p95 on
-both samples in every map and setting. No p95 may more than double;
-Lomsdal-Visten walking must not get slower. Profile its slowest pairs and
+**Validation required after the radius decision.** Preserve the 200 phase-10
+pairs per map: 2,400 comparisons across kayak, kayak-paths, walking and paths.
+Also check the radius study's 120 starts in all four settings and its 48
+Kloten readings: 528 comparisons. Both references independently implement
+the d + 250 m set. Report before/after p95 on both samples in every setting.
+On the phase-10 sample no p95 may more than double; Lomsdal-Visten walking
+must not get slower. Profile its slowest pairs and
 fix entry/connector costs here without changing answers. Pin all 24 new
 Kloten answers and keep the 24 attached answers unchanged.
 
-**Drive required, not yet run.** E8 at z17, as a raw tap in both settings,
-must reach Q over the northern launch at road node 141123. Compare W8 at
-z16 and z17, reporting the measured tolerance. Read a walking road-interior
-entry, the drawn connector, panel split and export. Update moved scene
-figures with a phase-11 note; selected kayak/entry checks must pass twice
-per rebuilt page, then `command make drive-all` once. No graph or tile build.
+**Drive, 2026-09-26.** E8 at z17 stays off-network and reaches Q over the
+northern launch at road node 141123 in both settings: **231.360461 m** on
+foot at **313.813413 land price** off, **234.083470 m / 368.891389** on.
+W8 takes that northern way at both z16 (snapped) and z17 (free); its foot
+metres differ by **4.882311 m** off and **6.817137 m** on. The largest
+error against the virtual-table differences is **0.000021 m**, inside the
+drive's 0.001 m tolerance. Walking E8 enters road 45537 internally with an
+**8.803833 m** connector, **172.629568 m** total on foot and **239.384955**
+cost. The drawn connector and partial edge share exactly one joining
+coordinate; the panel split, Garmin and GPX retain both. All borrowed state
+is restored. Selected kayak/entry checks pass twice per rebuilt page:
+**384 Kloten / 203 Abisko / 207 Lomsdal-Visten readings**. Changed scene
+figures carry phase-11 notes; the full figures and stored-plan behavior are
+in the [measurement record](kayak-mode-phase11-measurements.md#build-display-and-export).
 
 **First prototype, stopped 2026-09-25 — history.** On Abisko's
 unchanged 200 phase-10 pairs in kayak mode with Stay on paths off, warm
@@ -1623,6 +1636,36 @@ records five starts per bin in all maps/settings and the Kloten readings,
 recommendation is explicitly left for Uwe to decide. Production is unchanged;
 no radius is adopted and no build or drive was run.
 
+
+**Uwe's radius decision, 2026-09-25.** Shown the study's table and review's
+reading of its five worst d + 250 m cases, he answers **"Ja"**: use the
+relative radius at starts and targets in all four settings, and ship walking
+connectors batched through `connectorScan`. The audit counted the same wet
+midpoints on 48,000 connectors; the largest price difference was zero.
+The five worst losses were exits on edges 1.3–10 km from random targets,
+where the unlimited model left a path to walk cross-country. That wider exit
+question is deferred, not silently included in the local rule.
+
+
+**Built 2026-09-26.** Uwe's **"Ja"** to d + 250 m at starts and targets,
+in walking and kayak with both switch settings, is implemented through the
+edge index and cached cumulative lengths. The admissible kayak entry floor
+includes node and interior dry-box floors. Walking uses the audited batch
+sampler: **48,000 equal wet counts, zero price difference**. Both independent
+samples pass: **2,400 + 528 comparisons**, largest price error
+**5.82×10⁻¹¹**. The 24 free Kloten rows match the virtual table within
+**0.000029 m** carry; all 24 attached rows stay unchanged. All twelve speed
+gates pass; Lomsdal-Visten walking p95 is **10.898 → 3.845 s**, **64.7% lower**.
+Walking changes **421/1,200** phase-10 answers at the 0.01 threshold, always
+cheaper under the same objective. Both samples' timings, changes and slow-pair
+profiles are in the measurement record. The three rebuilt pages retain
+byte-identical graph headers and data. Stored legs retain their saved parts
+on load; editing their endpoint pair lets the new rule compete. The two
+failed prototypes and radius study above remain the history of this phase.
+The complete drive-all rerun is green: **1,638 Abisko / 1,644 Lomsdal-Visten /
+1,793 Kloten readings**, no broken invariants or moved figures.
+`command make hooks-run` passes with network, including both test suites.
+
 ## 5. Not in this plan
 
 - Sea kayaking's own concerns — wind, exposure, tides — nothing here prices them.
@@ -1632,3 +1675,7 @@ no radius is adopted and no build or drive was run.
   would be a network of nothing.
 - Norway's stream lines, unless phase 1 finds a size class.
 - The atlas; the water network goes there with `libs`, the page does not.
+- Leaving a path mid-edge beyond d + 250 m to reach a far off-path target.
+  Phase 11's radius study measured up to 11.6% price loss from excluding
+  those distant exits. This belongs to the atlas planner's design,
+  `atlas/docs/decisions.md` §9.1 item 4, and is not scheduled.

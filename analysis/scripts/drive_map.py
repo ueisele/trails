@@ -322,7 +322,12 @@ SCENES: dict[str, Scene] = {
         kayak_portage=((65.742431, 13.002636), (65.734636, 13.004338)),
         kayak_portage_path_m=959.6899007960781,
         # The level channel is Korslången's; the phase-10 road and switch fixtures are at Kloten.
-        skips=("a level channel is paddled both ways", "a kayak launches from the road", "the kayak path switch changes the carry"),
+        skips=(
+            "a level channel is paddled both ways",
+            "a kayak launches from the road",
+            "the kayak path switch changes the carry",
+            "a way enters the middle of a road",
+        ),
         long_chain="trail-group-ut-no-414306-7244296-42442",
         position=(65.55, 13.05),
         view=(65.60, 13.20),
@@ -376,12 +381,13 @@ SCENES: dict[str, Scene] = {
             # Phase 10: walking land price and launches, with Stay on paths off.
             "kayak portage on foot, m": 144.679,
             "kayak portage water, m": 1550.194,
-            "walking: shore-pair foot, m": 1074.646,
+            # Phase 11: local interior entries shorten both fixed walking ways.
+            "walking: shore-pair foot, m": 964.077,
             "walking: shore-pair water, m": 0,
-            "walking: shore-pair straight land, m": 747.568,
-            "stay on paths: shore-pair foot, m": 1593.360,
+            "walking: shore-pair straight land, m": 659.594,
+            "stay on paths: shore-pair foot, m": 1434.653,
             "stay on paths: shore-pair water, m": 0,
-            "stay on paths: shore-pair straight land, m": 496.858,
+            "stay on paths: shore-pair straight land, m": 469.627,
             # Phase 9 adds one noding post: 7,639 → 7,640 points; GPX words are unchanged.
             # Phase 10 launch noding resamples the same way: 7,640 points → 7,641 points; GPX words stay unchanged.
             "dry way figures bytes": "fed593fbf1505692cd6cfdf78faaa894c5227b6412116ea9766b2d5c81260c56",
@@ -507,7 +513,12 @@ SCENES: dict[str, Scene] = {
         kayak_portage=((68.268452, 18.179781), (68.271026, 18.180649)),
         kayak_portage_path_m=335.9521263872096,
         # The level channel is Korslången's; the phase-10 road and switch fixtures are at Kloten.
-        skips=("a level channel is paddled both ways", "a kayak launches from the road", "the kayak path switch changes the carry"),
+        skips=(
+            "a level channel is paddled both ways",
+            "a kayak launches from the road",
+            "the kayak path switch changes the carry",
+            "a way enters the middle of a road",
+        ),
         # Kungsleden from Abisko to Abiskojaure and Rallarvägen on to Tornehamn,
         # one register chain of 30.7 km.
         long_chain="trail-group-leder-647291-7598453-30741",
@@ -563,12 +574,13 @@ SCENES: dict[str, Scene] = {
             "kayak bay water, m": 1416.986,
             "kayak portage on foot, m": 1.45,
             "kayak portage water, m": 417.749,
-            "walking: shore-pair foot, m": 2935.858,
-            "walking: shore-pair water, m": 20.295,
-            "walking: shore-pair straight land, m": 509.34,
-            "stay on paths: shore-pair foot, m": 2948.287,
-            "stay on paths: shore-pair water, m": 30.405,
-            "stay on paths: shore-pair straight land, m": 495.624,
+            # Phase 11: local interior entries replace node-only connectors for these fixed taps.
+            "walking: shore-pair foot, m": 2259.064,
+            "walking: shore-pair water, m": 15.244,
+            "walking: shore-pair straight land, m": 352.926,
+            "stay on paths: shore-pair foot, m": 2265.931,
+            "stay on paths: shore-pair water, m": 20.331,
+            "stay on paths: shore-pair straight land, m": 339.992,
             # Phase 10 launch noding resamples the same way: 6,418 points → 6,412 points; GPX words stay unchanged.
             "dry way figures bytes": "83566506ec4d0f6c665f977a1b8f5676488b655fa1261ecdd0954506707a973a",
             "dry way GPX description bytes": "3c6ed6696078211fdff2f9556c135bf05b3fec2e092950d4e2d5295ce724ee57",
@@ -757,9 +769,10 @@ SCENES: dict[str, Scene] = {
             "Kloten northern shore, Stay on paths off: water m": 28.514,
             "Kloten northern shore, Stay on paths on: on foot m": 224.873,
             "Kloten northern shore, Stay on paths on: water m": 28.514,
-            "kayak ground/path competition, Stay on paths off: on foot m": 147.612,
-            "kayak ground/path competition, Stay on paths off: straight ground m": 88.881,
-            "kayak ground/path competition, Stay on paths off: road m": 52.325,
+            # Phase 11: a middle entry buys more road and less straight ground at the same prices.
+            "kayak ground/path competition, Stay on paths off: on foot m": 163.893,
+            "kayak ground/path competition, Stay on paths off: straight ground m": 51.201,
+            "kayak ground/path competition, Stay on paths off: road m": 106.286,
             "kayak ground/path competition, Stay on paths on: on foot m": 321.419,
             "kayak ground/path competition, Stay on paths on: straight ground m": 14.913,
             "kayak ground/path competition, Stay on paths on: road m": 300.100,
@@ -773,17 +786,18 @@ SCENES: dict[str, Scene] = {
             "Korslång upstream on foot, m": 115.352,
             "Korslång downstream water, m": 1184.863,
             "Korslång downstream on foot, m": 115.352,
-            # The same two Storsjön taps on the published walking-only page.
-            "walking: shore-pair foot, m": 3266.274,
-            "walking: shore-pair water, m": 8.024,
-            "walking: shore-pair straight land, m": 70.879,
-            "stay on paths: shore-pair foot, m": 3266.274,
-            "stay on paths: shore-pair water, m": 8.024,
-            "stay on paths: shore-pair straight land, m": 70.879,
+            # Phase 11: the same Storsjön taps use local interior entries in both walking settings.
+            "walking: shore-pair foot, m": 3225.664,
+            "walking: shore-pair water, m": 19.836,
+            "walking: shore-pair straight land, m": 60.96,
+            "stay on paths: shore-pair foot, m": 3239.75,
+            "stay on paths: shore-pair water, m": 13.206,
+            "stay on paths: shore-pair straight land, m": 65.192,
             # Phase 9: the fixed journey has 9,074 points instead of 9,076; its GPX words stay unchanged.
             # Phase 10 launch noding resamples the same way: 9,074 points → 9,051 points; GPX words stay unchanged.
-            "dry way figures bytes": "fdcb6b6d90b2f5f312169c95a6ea1f87579d4ffb46f525ffc0d078d4afc031a0",
-            "dry way GPX description bytes": "06ef1cf796a83eeccd0e12f85890064bd1c238ac193e55628f19ec8c32458969",
+            # Phase 11: local road entries reduce straight ground, 0.22 → 0.03 km; the journey has 9,053 points.
+            "dry way figures bytes": "74341e3c191f53351bab3b64eeb07e23f8e69387fde2fa13db87dc6efabeab40",
+            "dry way GPX description bytes": "304f3b3b3d4ef8ca6462c68ebaaccffba6cf439abddc5ad061234ef9d6e148e3",
             # Twice the rebuilt page's measured 1,240 ms, allowing two drives.
             "map build ceiling in ms (Firefox on forge)": 2480,
             "paths in the overlay pane": 13149,
@@ -7629,6 +7643,7 @@ def read_water_leg(
     via: tuple[str, ...] = (),
     measure_routing: bool = False,
     measure_shore: bool = False,
+    raw_zoom: int | None = None,
 ) -> dict[str, Any]:
     """Borrow the plan for a scene leg, read its parts and restore its state.
 
@@ -7643,6 +7658,7 @@ def read_water_leg(
         via: Chains whose traversed geometry is measured in the resulting track
         measure_routing: Read the chosen search label through the drive-only probe
         measure_shore: Read paddled coordinates through the drive-only probe
+        raw_zoom: Place raw finger taps at this zoom, and read interior-entry geometry
 
     Returns:
         The public plan and profile readings, with a state-restoration comparison
@@ -7653,11 +7669,27 @@ def read_water_leg(
     # This closure exists only in the copy served by the drive.
     page.evaluate("() => { window.trailsDriveHistory = window.kayakMeasure?.keepHistory?.(); }")
     view = page.evaluate(with_map("() => ({center: __MAP__.getCenter(), zoom: __MAP__.getZoom()})"))
-    changed = False
+    changed = 0
     try:
         page.evaluate("s => { trailsPlan.kayak(s.kayak); trailsPlan.stayOnPaths(s.paths); }", {"kayak": paddling, "paths": paths})
-        page.evaluate("points => trailsPlan.fromPlaces(points.map(p => ({lat: p[0], lon: p[1]})))", points)
-        changed = True
+        if raw_zoom is None:
+            page.evaluate("points => trailsPlan.fromPlaces(points.map(p => ({lat: p[0], lon: p[1]})))", points)
+            changed += 1
+        else:
+            # Four edits fit in the undo history even when the borrowed plan
+            # has many points. The two final placements use the raw tap API.
+            page.evaluate("p => trailsPlan.fromPlaces([{lat:p[0],lon:p[1]}])", points[0])
+            changed += 1
+            page.wait_for_function("() => !trailsPlan.busy()", timeout=120_000)
+            painted(page)
+            page.evaluate("() => trailsPlan.remove(0)")
+            changed += 1
+            page.wait_for_function("() => !trailsPlan.busy()", timeout=120_000)
+            page.evaluate(with_map("a => { __MAP__.setView(a.point, a.zoom, {animate:false}); }"), {"point": points[0], "zoom": raw_zoom})
+            for point in points:
+                page.evaluate("p => trailsPlan.place(p[0], p[1])", point)
+                changed += 1
+                page.wait_for_function("() => !trailsPlan.busy()", timeout=120_000)
         page.wait_for_function("() => !trailsPlan.busy() && trailsPlan.state().legs.length === 1", timeout=120_000)
         painted(page)
         planning_line = page.locator(".trails-profile-name").text_content()
@@ -7714,18 +7746,17 @@ def read_water_leg(
               finally { m.Heap.prototype.pop = originalPop; }
               if (!joined) throw new Error('the off-network water detour was not routed');
               const work = m.router(graph), head = joined.head, tail = joined.tail;
-              const entry = m.connectorPrice(graph, a.lon, a.lat, graph.nodeLon[head], graph.nodeLat[head]);
-              const connectors = [[a.lon, a.lat, graph.nodeLon[head], graph.nodeLat[head]],
-                [graph.nodeLon[tail], graph.nodeLat[tail], b.lon, b.lat]]
+              const enter = joined.headPoint || {lon:graph.nodeLon[head],lat:graph.nodeLat[head]};
+              const leave = joined.tailPoint || {lon:graph.nodeLon[tail],lat:graph.nodeLat[tail]};
+              const connectors = [[a.lon, a.lat, enter.lon, enter.lat], [leave.lon, leave.lat, b.lon, b.lat]]
                 .map(c => trailsProfilePanel.metresBetween(...c));
-              const edges = joined.over ? joined.over.edges : [];
-              // The suffix label already includes the exit connector. Add only
-              // the entry, exactly as the search compares complete ways.
-              routing = {land: entry.land + work.bestLand[head], pops,
-                stepBound: 2 * graph.header.nodes + 2 * graph.header.edges + 1,
-                paddled: edges.every(e => graph.header.sources[graph.sources[e]].kind === 'paddle'),
+              const edges = joined.over ? joined.over.edges : [], cuts = [joined.headCut,joined.tailCut].filter(Boolean);
+              routing = {land: joined.land, pops,
+                stepBound: 3 * graph.header.nodes + 2 * graph.header.edges + 1,
+                paddled: edges.concat(cuts.map(c=>c.edge)).every(e => graph.header.sources[graph.sources[e]].kind === 'paddle'),
                 metres: connectors.reduce((sum, length) => sum + length, 0)
-                  + edges.reduce((sum, e) => sum + work.length[e], 0),
+                  + edges.reduce((sum, e) => sum + work.length[e], 0)
+                  + cuts.reduce((sum, c) => sum + Math.abs(c.to-c.from), 0),
                 connectors, cellM: graph.water.cellM,
                 allowance: 2 * graph.water.cellM * connectors.filter(length => length >= 1).length};
             }
@@ -7740,10 +7771,25 @@ def read_water_leg(
             }""",
             {"via": via, "measureRouting": measure_routing, "measureShore": measure_shore},
         )
+        if raw_zoom is not None:
+            got["entry"] = page.evaluate("""() => {
+                const s=trailsPlan.state(),g=trailsGraph,m=kayakMeasure,j=m.joinedRoute(g,s.points[0],s.points[1]);
+                const files=m.files(),point=j?.headPoint,cut=j?.headCut;
+                const exported=Object.fromEntries(Object.entries(files).map(([kind,text])=>{
+                    const doc=new DOMParser().parseFromString(text,'application/xml');
+                    const vertices=[...doc.querySelectorAll(kind==='gpx'?'trkpt':'rtept')];
+                    const contains=p=>p&&vertices.some(v=>['lat','lon'].every(axis=>{
+                        const value=v.getAttribute(axis),decimals=(value.split('.')[1]||'').length;
+                        return value===p[axis].toFixed(decimals);
+                    }));
+                    return [kind,{start:!!contains(s.points[0]),entry:!!contains(point),vertices:vertices.length}];
+                }));
+                return {point,cut,edges:j?.over?.edges||[],land:j?.land,cost:j?.cost,exported};
+            }""")
     finally:
         # Undo returns the original points and their stage marks; clearing the
         # temporary plan would discard the plan the preceding reading left us.
-        if changed:
+        for _ in range(changed):
             page.evaluate("() => trailsPlan.undo()")
             page.wait_for_function("() => !trailsPlan.busy()", timeout=120_000)
         page.evaluate("() => { window.trailsDriveHistory?.(); delete window.trailsDriveHistory; }")
@@ -8098,6 +8144,81 @@ def a_carry_uses_walking_prices(page: Any) -> Check:
             stands("kayak portage water, m", round(s["crossed"], 3), within=0.001),
         ],
     )
+
+
+def a_way_enters_the_middle_of_a_road(page: Any) -> Check:
+    """Raw taps beyond the finger reach enter Kloten's road before its junction."""
+    name = "a way enters the middle of a road"
+    if SCENE.stem != "malingsbo-kloten":
+        return Check(name, skipped="the phase-11 rental-road readings belong to Kloten")
+    east = (59.89594919593639, 15.288158150296887)
+    west = (59.89594919593639, 15.287872308948302)
+    bay = (59.898026272880365, 15.288010426978055)
+    readings: list[Reading] = []
+    for paths in (False, True):
+        east_read = read_water_leg(page, (east, bay), paths=paths, raw_zoom=17, measure_shore=True)
+        snapped = read_water_leg(page, (west, bay), paths=paths, raw_zoom=16, measure_shore=True)
+        free = read_water_leg(page, (west, bay), paths=paths, raw_zoom=17, measure_shore=True)
+        for label, got in (("E8 z17", east_read), ("W8 z16", snapped), ("W8 z17", free)):
+            prefix = f"{label}, Stay on paths {'on' if paths else 'off'}"
+            state, entry = got["state"], got["entry"]
+            readings.extend(water_leg_readings(got, prefix))
+            readings.append(Reading(f"{prefix}: the northern launch at road node 141123", 284183 in entry["edges"], True))
+            whole = state["walked"] + state["crossed"]
+            words = f"{whole / 1000:.2f} km · {state['crossed'] / 1000:.2f} km 🛶 · {state['walked'] / 1000:.2f} km 🚶"
+            readings.append(Reading(f"{prefix}: the panel includes every piece", words in got["planningLine"], True))
+            if label != "W8 z16":
+                parts = got["paddledTrack"]
+                point = entry["point"]
+                readings.extend(
+                    [
+                        Reading(f"{prefix}: the raw start stays off-network", state["points"][0].get("edge", -1), -1),
+                        Reading(f"{prefix}: the road is entered in its middle", entry["cut"]["edge"], 45537),
+                        Reading(f"{prefix}: connector then partial road", [p["kind"] for p in parts[:2]], ["land", "routed"]),
+                        Reading(
+                            f"{prefix}: the connector ends at the entry", [parts[0]["lon"][-1], parts[0]["lat"][-1]], [point["lon"], point["lat"]]
+                        ),
+                        Reading(f"{prefix}: the partial road starts there", [parts[1]["lon"][0], parts[1]["lat"][0]], [point["lon"], point["lat"]]),
+                        Reading(
+                            f"{prefix}: GPX retains connector and entry",
+                            entry["exported"]["gpx"]["start"] and entry["exported"]["gpx"]["entry"],
+                            True,
+                        ),
+                        Reading(
+                            f"{prefix}: Garmin retains connector and entry",
+                            entry["exported"]["garmin"]["start"] and entry["exported"]["garmin"]["entry"],
+                            True,
+                        ),
+                    ]
+                )
+            else:
+                readings.append(Reading(f"{prefix}: the finger still snaps", state["points"][0].get("edge"), 45537))
+            readings.append(noted(f"{prefix}: on foot m", state["walked"]))
+        # Phase-10 attached readings and the phase-11 virtual table measured
+        # these differences; the raw-tap drive now checks the displayed pieces.
+        readings.append(
+            Reading(
+                f"W8 zoom difference, paths {paths}: on foot m",
+                free["state"]["walked"] - snapped["state"]["walked"],
+                6.817131 if paths else 4.882332,
+                within=0.001,
+            )
+        )
+        readings.append(Reading(f"E8 paths {paths}: on foot m", east_read["state"]["walked"], 234.083476 if paths else 231.360461, within=0.001))
+        readings.append(Reading(f"E8 paths {paths}: land price", east_read["entry"]["land"], 368.891389 if paths else 313.813413, within=0.001))
+    walk = read_water_leg(page, (east, (59.897429, 15.288255)), paddling=False, raw_zoom=17, measure_shore=True)
+    readings.extend(water_leg_readings(walk, "walking E8"))
+    readings.extend(
+        [
+            Reading("walking E8 stays off-network", walk["state"]["points"][0].get("edge", -1), -1),
+            Reading("walking E8 enters the road mid-edge", walk["entry"]["cut"]["edge"], 45537),
+            Reading("walking draws connector then partial road", [p["kind"] for p in walk["paddledTrack"][:2]], ["land", "routed"]),
+            noted("walking E8: connector m", walk["paddledTrack"][0]["length"]),
+            noted("walking E8: on foot m", walk["state"]["walked"]),
+            noted("walking E8: price", walk["entry"]["cost"]),
+        ]
+    )
+    return Check(name, readings)
 
 
 def a_kayak_launches_from_the_road(page: Any) -> Check:
@@ -8470,11 +8591,18 @@ def the_walking_modes_never_take_the_water(page: Any) -> Check:
             (
                 "helper input",
                 ((59.871129, 15.049214), (59.891313, 15.159216666667)),
-                9284.154871283,
-                "Uwe accepted 9,287.861 → 9,590.349 m; final dam noding gives 9,284.155 m, within the original bound",
+                9279.532645206802,
+                "Uwe accepted 9,287.861 → 9,590.349 m; dam noding gives 9,284.155 m; phase 11 local entries give 9,279.533 m",
             ),
         ),
-        "lomsdal-visten": (("typed leg", ((65.43, 13.045), (65.425, 13.035)), 1066.298114879, "819.932 → 1,066.298 m, accepted by Uwe"),),
+        "lomsdal-visten": (
+            (
+                "typed leg",
+                ((65.43, 13.045), (65.425, 13.035)),
+                988.6863400997744,
+                "819.932 → 1,066.298 m, accepted by Uwe; phase 11 local entries give 988.686 m",
+            ),
+        ),
     }
     for label, points, expected, change in accepted.get(SCENE.stem, ()):
         got = read_water_leg(page, points, paddling=False, paths=False)
@@ -15196,6 +15324,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(timed(a_bay_is_cut_and_a_lake_is_not, page))
     if wanted(a_carry_uses_walking_prices):
         checks.append(timed(a_carry_uses_walking_prices, page))
+    if wanted(a_way_enters_the_middle_of_a_road):
+        checks.append(timed(a_way_enters_the_middle_of_a_road, page))
     if wanted(a_kayak_launches_from_the_road):
         checks.append(timed(a_kayak_launches_from_the_road, page))
     if wanted(the_kayak_path_switch_changes_the_carry):
@@ -15392,6 +15522,7 @@ def main() -> int:
             or wanted(a_kayak_way_follows_the_shore)
             or wanted(a_bay_is_cut_and_a_lake_is_not)
             or wanted(a_carry_uses_walking_prices)
+            or wanted(a_way_enters_the_middle_of_a_road)
             or wanted(a_kayak_launches_from_the_road)
             or wanted(the_kayak_path_switch_changes_the_carry)
             or wanted(the_kayak_panel_counts_the_whole_way)
@@ -15410,6 +15541,8 @@ def main() -> int:
                 raise ValueError("the plan search probe anchor changed")
             probe = (
                 "window.kayakMeasure = {joinedRoute, router, connectorPrice, Heap, "
+                "files: () => { const s=composeRoute(), f=figuresOf(s), t=told(s), p=writable(); "
+                "return {gpx:panel().routeFile(f,s,t,p).text,garmin:panel().garminFile(f,s,t,p).text}; }, "
                 "keepHistory: () => { const kept = history.slice(); return () => { history = kept; refresh(); }; }, "
                 "parts: () => legs.flatMap(l => (l.parts || []).map(p => ({kind:p.kind, "
                 "lon:Array.from(p.lon), lat:Array.from(p.lat), length:p.length, sources:p.tally.sources, "
