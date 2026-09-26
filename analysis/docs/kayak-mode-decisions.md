@@ -99,8 +99,18 @@ would draw it without a change.
   Uwe's phone reading of the channel.
 - **Lomsdal-Visten has no stream edges at all** — not a defect: N50's `vannbredde` codes
   were never matched to Topografi 50's class 2 (above), so Norway's streams stayed out.
+- **The line off the bank — approved 2026-09-25, started 2026-09-26.** Planned in
+  `kayak-offset-phases.md`, phases 12a–12h; decided below under §5. Open for 12f: how
+  the offshore snapping composes with phase 11's d + 250 m interior entries (that
+  plan's §4.3). Per-leg modes follow this line.
 
 ## 5. Changes
+
+- 2026-09-26 — phase 12a: the offset line's baseline is frozen from main `6de243c` without a rebuild, and the 10 / 15 / 20 m comparison on twelve source patches finds no reason to leave 15 m. Records and scratch only; the figures are under "The line off the bank" below.
+
+- 2026-09-26 — Uwe decides that edge entries go first (built as phase 11), then that the line off the bank starts now. Its approved plan enters the repository as `kayak-offset-phases.md`, renumbered 12a–12h because 11 is taken; per-leg modes come after it.
+
+- 2026-09-25 — Uwe approves the plan for the line off the bank: "Zum Plan für den Abstand zum Ufer: Ja genau so wie vorgeschlagen". The five decisions it put to him stand as recommended; they are listed under "The line off the bank" below.
 
 - 2026-09-26 — phase 11 is built: local d + 250 m interior entries and exits in all four settings, as Uwe approved, with exact walking midpoint batching. All 2,928 references and twelve speed gates pass; Norway walking p95 falls 64.7%. The graphs and stored-plan restoration stay unchanged; distant exits remain unscheduled atlas work.
 
@@ -167,6 +177,53 @@ would draw it without a change.
 - 2026-09-21 — phase 3 (`7f68137`): lakes levelled per connected body in the build (150 bodies from the register, 1,005 from the shore's 10th percentile; median difference 0.25 m, largest 2.82 m), paddled parts flat and continuous in the profile, the heading *2.47 km 🛶 · 3.51 km 🚶*, *by kayak* and *portage on foot* in words, paddled points in the GPX and the Garmin course; the dry way byte-identical in both walking settings. Two stops (the shore's tiles, the body's identity).
 - 2026-09-21 — phase 2 (`bea479c`): the Kayak switch beside *Stay on paths*, the prices per mode, direction as a predicate on the step, the mode's cheapest metre as the floor, snapping by node eligibility, a paddled edge tallied like a ferry for marking but inside the reserve; the sweep settled **k = 1.5, P = 2**. Three stops on the way (the search's direction, where the settings come from, the tally); the built-note below.
 - 2026-09-21 — phase 1 (`ac467b2`): the water network in the build — Shore, Open water, Streams of kind `PADDLE`, portage chords and their ties as `BRIDGE`, `NetworkSource.directed` carried to a per-edge `one_way`; the built-note below. Two stops on the way, both the plan's (the flow test, the layer of the direction).
+
+### The line off the bank — approved 2026-09-25, phase 12a 2026-09-26
+
+Uwe, 2026-09-24: *"Normalerweise ist man schon mindestens 10 bis 20 Meter davon
+entfernt."* His answer to the plan, 2026-09-25, verbatim: *"Zum Plan für den Abstand
+zum Ufer: Ja genau so wie vorgeschlagen"*. On 2026-09-26 he put edge entries first
+(phase 11) and then started this line. The plan is `kayak-offset-phases.md`.
+
+**Uwe's decisions, as the plan recommended them:**
+
+1. **The distance.** One fixed build constant, 15 m, on all three maps, no switch or
+   slider. A small 10 / 15 / 20 m geometry comparison on the same water bodies before
+   implementation, no route sweep and no automatic choice of the cheapest; 15 m stays
+   unless that comparison shows a conflict, which comes back to him.
+2. **The precision.** Offset the unsimplified dissolved water (Marktäcke in Sweden, N50
+   in Norway), then simplify the new contours at 2 m, finer locally where validation needs
+   it. The decoded ordinary offset line stays at least 12 m from the source bank, within
+   2.1 m of its unsimplified offset contour.
+3. **Narrows, islands and bays.** Where the offset vanishes, paddle a pruned Euclidean
+   centre line: every existing water connection, both passages round an island and
+   terminal bay branches of 30 m or more, or with any access anchor, are kept. No bank
+   fallback and no carry because a buffer vanished.
+4. **The snapping.** A normal near-bank water tap snaps to the offshore line (Shore or
+   Narrow water), with a water reach of at least d + 2.1 m (17.1 m); deliberate land,
+   path and launch starts and explicit selections keep their meaning.
+5. **The resource budgets.** At most 1.5× the baseline's graph nodes, edges and
+   vertices; at most +0.5 / +1.0 / +1.5 MB Brotli per page for Abisko / MK / Norway;
+   kayak p95 at most `max(1.5 × baseline, 300 ms)` per Stay-on-paths setting.
+   Sequential full builds under the historical 8 GiB cap when 12g comes; local probes
+   at 4 GiB.
+
+The plan's prices (Shore, Narrow water and Landing water at 1, Open water at 1.5,
+phase 10 otherwise unchanged) and its one-reviewed-phase-at-a-time rollout are part of
+what he accepted "as proposed"; neither changes a rule already decided. Implementation
+and review choices are recorded with the phases, not here.
+
+**Phase 12a — the baseline frozen and the evidence set made, 2026-09-26.** The baseline
+is main `6de243c` as published: graph and data byte-identical to phase 10's final pages,
+105,923 / 294,642 / 402,240 edges, 2,202,200 / 8,006,978 / 7,778,287 page Brotli bytes,
+kayak p95 350.30 / 2,069.00 / 3,779.40 ms (Stay on paths off) on phase 11's timing, for
+Abisko / MK / Lomsdal-Visten; the full table and all 2,928 frozen labels are under phase
+12a in `kayak-offset-phases.md`. The 10 / 15 / 20 m comparison on twelve source patches
+and nine synthetic fixtures finds no conflict with 15 m, so it stands without a question to
+Uwe. It measures what 12b–12d inherit: plain 2 m simplification keeps the 12 m clearance
+(at least 12.265 m) but exceeds the 2.1 m deviation in six patches, and 292 of 665 patch
+anchors at 15 m need more than a straight spur. The plan's §4.1 premise holds, and
+launches depend on the Shore source the same way. No production code changed.
 
 ### Phase 11 — Enter an edge in its middle, 2026-09-25
 

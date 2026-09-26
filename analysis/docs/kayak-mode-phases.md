@@ -1666,6 +1666,14 @@ The complete drive-all rerun is green: **1,638 Abisko / 1,644 Lomsdal-Visten /
 1,793 Kloten readings**, no broken invariants or moved figures.
 `command make hooks-run` passes with network, including both test suites.
 
+### After phase 11 — the line off the bank, then per-leg modes
+
+Next is the kayak line about 15 m off the bank, and in the middle where the water
+is narrower: Uwe approved its plan on 2026-09-25 and started it on 2026-09-26, once
+phase 11 was built. It is planned and recorded in its own file,
+[`kayak-offset-phases.md`](kayak-offset-phases.md), as phases 12a–12h against a
+baseline frozen from main `6de243c`. Per-leg modes follow it.
+
 ## 5. Not in this plan
 
 - Sea kayaking's own concerns — wind, exposure, tides — nothing here prices them.
