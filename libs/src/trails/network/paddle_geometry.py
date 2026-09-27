@@ -36,6 +36,15 @@ through every passage and round every island, and into a bay when its branch
 reaches 2d from the contour or holds an access anchor; the rest is pruned and
 reported. A contour stretch held by two shoulders of kept closed-off water is
 an open-water crossing, not shore.
+
+Every place where land meets the water today keeps its point on the bank, and
+a short paddled spur of Landing water runs from it to the line (phase 12d):
+straight where that lies in the body's own water clear of every dam disc, bent
+round the bank where it does not, to the centre node phase 12c gave an anchor
+in closed-off water. Class-2 streams are joined where they actually meet the
+water, and each exact lake/river interface is kept once and joined to the line
+on both sides. Nothing here changes a carry or a launch: they are measured to
+the bank, which stays where it is.
 """
 
 import math
@@ -1563,6 +1572,9 @@ def _layout(
     shapely.prepare(keep_region)
     sample_reach = 3 * d + 3 * step + 1.0
     tile_margin = 2 * d + TILE_BAND_M + 3 * step + 2.0
+    if keep_region.is_empty:
+        # A body the offset carries everywhere, a round lake without corners, calls for no middle.
+        return _Layout(seed_tree, keep_region, [])
     x0, y0, x1, y1 = shapely.bounds(keep_region)
     columns = range(int(np.floor((x0 - origin[0]) / tile_m)), int(np.floor((x1 - origin[0]) / tile_m)) + 1)
     rows_range = range(int(np.floor((y0 - origin[1]) / tile_m)), int(np.floor((y1 - origin[1]) / tile_m)) + 1)
@@ -3350,3 +3362,714 @@ def _off_dams(
         if len(ok):
             out[index] = candidates[ok[np.argmin(np.hypot(*(candidates[ok] - raw[index]).T))]]
     return out
+
+
+#: The plan's source for paddled access between a retained bank anchor and the line (§1.5), factor 1.
+LANDING_WATER = "Landing water"
+#: Phase 9's bank is the water's outline simplified at 5 m, so an anchor on it lies at most that
+#: far off the water; a spur's run from its anchor up to the water stays within that band.
+BANK_STEP_M = SHORE_SIMPLIFY_M + 0.1
+#: Implementation choice (12d): the windows round an anchor a bent spur is sought in, smallest first.
+SPUR_WINDOWS_M = (60.0, 250.0, 1000.0)
+#: Implementation choice (12d): a bent spur turns this far into the water off the bank corner it rounds.
+TURN_OFFSET_M = 0.5
+#: How far a spur may stray off the water beyond its bank step: the page's grid at a bank end or in
+#: grid-narrow water, where its written target lies (§4.4's 0.1 m).
+EXCURSION_M = 0.1
+#: A dam disc as a polygon for the bent search, drawn round the analytic circle so no chord cuts into it.
+DISC_QUAD_SEGS = 32
+#: It is drawn a grid move wider still, so that no written vertex of a way round it falls inside the circle.
+DISC_POLYGON_M = DAM_CUT_M / math.cos(math.pi / (4 * DISC_QUAD_SEGS)) + GRID_MOVE_M + 0.01
+#: How far short of a target's foot the bent search tests the water: a line ending on a dam's circle
+#: ends inside that polygon, and the analytic test in _valid reads the last stretch instead.
+FOOT_SLACK_M = 0.1
+#: Where an anchor on a disc's circle steps out to, straight away from the dam: just beyond the polygon.
+DISC_OUTSIDE_M = DISC_POLYGON_M + 0.01
+#: Beyond the line, 15 m and its approved 2.1 m deviation off the bank, a contact is in open water.
+OPEN_BEYOND_M = PADDLE_OFFSET_M + CONTOUR_DEVIATION_M
+#: Where along its stream a phase-9 mouth anchor may lie from the stream's actual mouth: the 5 m bank
+#: crosses a stream up to 5 m off the water, farther along a stream that meets the bank at a slant.
+MOUTH_MATCH_M = 25.0
+#: Contact roles that are a line passing over the water rather than an arrival at its bank (12a's inventory).
+CROSSING_ROLES = frozenset({"walking_in_water", "stream_crossing"})
+MOUTH_ROLE = "mouth"
+STREAM_CROSSING_ROLE = "stream_crossing"
+#: A contact that is the map's crop rather than a way to the water: a line cut at the extent and
+#: bridged to its neighbour. Phase 9 kept such ends out of the landing audit, and so does this.
+CROP_ROLE = "crop"
+#: How a contact reaches the line: by a spur of its own, straight or bent; by its own line crossing
+#: the new lines; along its stream, which is not surface geometry and stays; at its stream's mouth
+#: join; on the line itself, where a centre branch ends at the bank corner the anchor stands on; or
+#: not at all, where the contact is the map's crop, or a way crossing open water far from any bank.
+STRAIGHT, BENT, CROSSES, ON_STREAM, AT_MOUTH, ON_LINE, AT_CROP = "straight", "bent", "crossing", "stream", "mouth", "on line", "crop"
+OVER_WATER = "over water"
+#: Where a class-2 stream meets its body's water: across the outline, or ending inside it.
+MOUTH_KIND, END_KIND = "mouth", "end"
+
+SPUR_COLUMNS = [
+    "contact",
+    "roles",
+    "body",
+    "route",
+    "source",
+    "target",
+    "target_row",
+    "node",
+    "length_m",
+    "bank_step_m",
+    "bank_step_inland_m",
+    "dry_m",
+    "stray_m",
+    "decoded_dry_m",
+    "decoded_stray_m",
+    "dam_clearance_m",
+    "anchor_moved_m",
+    "geometry",
+]
+
+
+@dataclass
+class Landings:
+    """How every retained contact reaches the line, the stream mouths, and the lake-owned interfaces.
+
+    Nothing here is wired into a graph: 12e nodes these lines into the network.
+
+    Attributes:
+        spurs: One row per contact: ``contact`` (its row in the contacts given), ``roles``, ``body``,
+            ``route`` (straight, bent, crossing, stream, mouth, on line, crop, over water), ``source`` (Landing water
+            where a line is added from the bank, Open water from a contact out beyond the line),
+            ``target`` (contour, centre or node) and ``target_row``, ``node``
+            (12c's anchor node, where reused), ``length_m``, ``bank_step_m`` and
+            ``bank_step_inland_m`` (the run from the anchor up to the water, and how far off the
+            water it reaches), ``dry_m`` and ``stray_m`` (outside the water beyond that run, and how
+            far off it), ``decoded_dry_m``, ``decoded_stray_m`` and ``dam_clearance_m`` (after the
+            page's grid), ``anchor_moved_m`` (how far the grid rule of 12c moved a written vertex
+            out of a dam disc) and the spur as ``geometry``; the anchor where no line is added
+        mouths: One row per class-2 stream mouth or stream end inside the water: ``stream`` (its
+            row), ``body``, ``kind``, the same route and check columns, and the join as ``geometry``
+        interfaces: One row per exact lake-owned interface: ``body``, the lake's owner columns,
+            ``lake_side`` and ``other_side`` (the pieces ending on it on each side), ``meets``
+            (those ends, the points 12e nodes it at) and the interface as ``geometry``
+        links: Open water from an interface into a side where no piece ends on it: ``interface``,
+            ``side``, the route and check columns and ``geometry``
+        failures: What no route could settle: ``kind``, ``detail``, the place, and ``candidate``,
+            the straight line that was tried
+    """
+
+    spurs: gpd.GeoDataFrame
+    mouths: gpd.GeoDataFrame
+    interfaces: gpd.GeoDataFrame
+    links: gpd.GeoDataFrame
+    failures: gpd.GeoDataFrame
+
+
+@dataclass
+class _Reach:
+    """One body's water, its lines and the dam points near it, for routing a spur."""
+
+    local: _Local
+    targets: np.ndarray
+    labels: list[tuple[str, int]]
+    tree: shapely.STRtree | None
+    dam_xy: np.ndarray
+    discs: BaseGeometry | None
+    #: The page's grid, and the dams whose discs a written vertex is moved out of.
+    dam_tree: shapely.STRtree | None = None
+    to_page: Transformer | None = None
+    from_page: Transformer | None = None
+
+
+def _dam_clearance(coords: np.ndarray, dam_xy: np.ndarray) -> float:
+    """The least distance of a polyline from the dam points: the analytic disc test of every segment."""
+    if not len(dam_xy) or not len(coords):
+        return math.inf
+    if len(coords) == 1:
+        return float(np.hypot(*(dam_xy - coords[0]).T).min())
+    return float(min(_distance_to_segment(dam_xy, one, other).min() for one, other in zip(coords[:-1], coords[1:], strict=True)))
+
+
+def _dry_after_step(line: LineString, water: BaseGeometry) -> tuple[float, float, float, float]:
+    """A spur's runs outside the water: the one from its anchor up to the water, its farthest reach off
+    the water, the rest's length, and how far the rest strays."""
+    dry = [g for g in shapely.get_parts(shapely.difference(line, water)) if isinstance(g, LineString) and g.length > DRY_NOISE_M]
+    start = Point(line.coords[0])
+    # The piece holding the anchor, whichever way round the difference returns it; a written anchor
+    # on the water's edge may land a grid move inside it.
+    first = [g for g in dry if g.distance(start) <= GRID_MOVE_M]
+    rest = [g for g in dry if g.distance(start) > GRID_MOVE_M]
+    return float(sum(g.length for g in first)), _off_water(first, water), float(sum(g.length for g in rest)), _off_water(rest, water)
+
+
+def _off_water(pieces: list[LineString], water: BaseGeometry) -> float:
+    """How far off the water the pieces reach, read along them: distance is 1-Lipschitz, so samples
+    every FINE_SAMPLE_M bound it within half of that."""
+    if not pieces:
+        return 0.0
+    coordinates = shapely.get_coordinates(shapely.segmentize(np.asarray(pieces, dtype=object), FINE_SAMPLE_M))
+    return float(shapely.distance(shapely.points(coordinates), water).max()) + FINE_SAMPLE_M / 2
+
+
+def _valid(coords: np.ndarray, reach: _Reach, lead: int = 0) -> bool:
+    """Whether a spur lies in its body's water after at most the bank step, and clear of every dam disc.
+
+    A spur ends on a written target, and a written line in grid-narrow water or at a bank end may
+    lie a few centimetres off it: the rest may stray by the plan's 0.1 m, no more. An anchor on a
+    disc's circle keeps its place; its first ``lead`` segments, the step straight away from the dam,
+    may be as near the dam as it is, and nothing after them nearer than the disc.
+    """
+    line = LineString(coords)
+    water = reach.local.near(line)
+    step, inland, _, stray = _dry_after_step(line, water)
+    # The run up to the water is the anchor's own way to it: no longer than its distance from the
+    # water and a turn's offset, so it never cuts a headland beside an anchor at the water's edge.
+    # Where a dam's disc covers the nearest water, it may go round the disc, within the band
+    # phase 9's 5 m bank already lies in.
+    off = float(shapely.distance(Point(coords[0]), water))
+    round_a_disc = _dam_clearance(coords[:1], reach.dam_xy) < DAM_CUT_M + 2 * BANK_STEP_M
+    if step > (2 * BANK_STEP_M if round_a_disc else off + TURN_OFFSET_M) or inland > BANK_STEP_M or stray > EXCURSION_M:
+        return False
+    if not len(reach.dam_xy):
+        return True
+    near = min(DAM_CUT_M, _dam_clearance(coords[:1], reach.dam_xy)) - DRY_NOISE_M
+    if _dam_clearance(coords[: lead + 1], reach.dam_xy) < near or _dam_clearance(coords[lead:], reach.dam_xy) < DAM_CUT_M - DRY_NOISE_M:
+        return False
+    if reach.to_page is None or reach.from_page is None:
+        return True
+    # Written on the page's grid, with 12c's rule moving a vertex out of a disc, it must stay out too.
+    written = _off_dams(coords, decoded(coords, reach.to_page, reach.from_page), reach.dam_tree, reach.to_page, reach.from_page, None)
+    return _dam_clearance(written, reach.dam_xy) >= DAM_CUT_M - DRY_NOISE_M
+
+
+def _turns(water: BaseGeometry) -> np.ndarray:
+    """The water's reflex corners, each moved ``TURN_OFFSET_M`` into the water: where a shortest way through it bends."""
+    out: list[np.ndarray] = []
+    for polygon in shapely.get_parts(water):
+        if not isinstance(polygon, Polygon):
+            continue
+        for ring in (polygon.exterior, *polygon.interiors):
+            coords = np.asarray(ring.coords)[:-1, :2]
+            if len(coords) < 3:
+                continue
+            before, after = coords - np.roll(coords, 1, axis=0), np.roll(coords, -1, axis=0) - coords
+            # Oriented with the water on the left of every ring, a right turn is a corner of land.
+            reflex = before[:, 0] * after[:, 1] - before[:, 1] * after[:, 0] < 0
+            if not reflex.any():
+                continue
+            one = before[reflex] / np.maximum(np.hypot(*before[reflex].T), 1e-12)[:, None]
+            other = after[reflex] / np.maximum(np.hypot(*after[reflex].T), 1e-12)[:, None]
+            normal = np.c_[-one[:, 1], one[:, 0]] + np.c_[-other[:, 1], other[:, 0]]
+            length = np.hypot(*normal.T)
+            usable = length > 1e-9
+            out.append(coords[reflex][usable] + TURN_OFFSET_M * normal[usable] / length[usable][:, None])
+    if not out:
+        return np.empty((0, 2))
+    turns = np.vstack(out)
+    return turns[shapely.covers(water, shapely.points(turns))]
+
+
+def _bent(point: np.ndarray, reach: _Reach, targets: np.ndarray, tree: shapely.STRtree, lead: np.ndarray) -> tuple[np.ndarray, int] | None:
+    """The shortest way found through the water round the bank's corners, in growing windows round the point."""
+    for half in SPUR_WINDOWS_M:
+        window = shapely.box(point[0] - half, point[1] - half, point[0] + half, point[1] + half)
+        chosen = tree.query(window)
+        if not len(chosen):
+            continue
+        water = shapely.clip_by_rect(reach.local.near(window), *window.bounds)
+        if reach.discs is not None:
+            water = shapely.difference(water, reach.discs)
+        # The nearest water clear of the discs that holds a line: a speck between a disc and the bank leads nowhere.
+        held = [g for g in shapely.get_parts(water) if shapely.intersects(g, targets[chosen]).any()]
+        if not held:
+            continue
+        inland = float(shapely.distance(Point(point), shapely.multipolygons(held) if len(held) > 1 else held[0]))
+        if inland > 2 * BANK_STEP_M:
+            continue
+        if inland > 0:
+            # An anchor on the bank crosses just that much land to it, round a disc where it must; _valid
+            # measures how far off the real water that run reaches, and refuses any other dry run.
+            reach_in: BaseGeometry = shapely.buffer(Point(point), inland + FOOT_SLACK_M, quad_segs=DISC_QUAD_SEGS)
+            if reach.discs is not None:
+                reach_in = shapely.difference(reach_in, reach.discs)
+            water = shapely.union(water, reach_in)
+        water = shapely.orient_polygons(water, exterior_cw=False)
+        if water.is_empty or not water.covers(Point(point)):
+            continue
+        shapely.prepare(water)
+        found = _visible_way(point, _turns(water), water, targets[chosen])
+        if found is not None:
+            path, target = found
+            coords = np.array([*lead, *path])
+            if _valid(coords, reach, len(lead)):
+                return coords, int(chosen[target])
+    return None
+
+
+def _visible_way(origin: np.ndarray, turns: np.ndarray, water: BaseGeometry, targets: np.ndarray) -> tuple[list[np.ndarray], int] | None:
+    """Dijkstra over the visibility of corners, ending at the nearest point of a target line seen from a corner."""
+    import heapq
+
+    xy = np.vstack([origin[None, :], turns])
+    count = len(xy)
+    distance = np.full(count, math.inf)
+    previous = np.full(count, -1, dtype=int)
+    settled = np.zeros(count, dtype=bool)
+    distance[0] = 0.0
+    heap = [(0.0, 0)]
+    best: tuple[float, int, np.ndarray, int] = (math.inf, -1, origin, -1)
+    # Each corner settles once; a stale heap entry is skipped. The bound is the pushes a settle can make.
+    for _ in range(count * count + 1):
+        if not heap:
+            break
+        reached, node = heapq.heappop(heap)
+        if settled[node]:
+            continue
+        settled[node] = True
+        if reached >= best[0]:
+            break
+        here = Point(xy[node])
+        feet = shapely.get_coordinates(shapely.shortest_line(here, targets))[1::2]
+        lengths = np.hypot(*(feet - xy[node]).T)
+        for index in np.argsort(lengths)[:4]:
+            total = reached + float(lengths[index])
+            if total >= best[0]:
+                break
+            # A target can end on a dam's circle, inside the polygon drawn round it; the analytic test follows.
+            short = feet[index] - (feet[index] - xy[node]) * min(1.0, FOOT_SLACK_M / max(float(lengths[index]), 1e-12))
+            if shapely.covers(water, LineString([xy[node], short])):
+                best = (total, node, feet[index], int(index))
+                break
+        open_nodes = np.flatnonzero(~settled)
+        steps = np.hypot(*(xy[open_nodes] - xy[node]).T)
+        better = reached + steps < np.minimum(distance[open_nodes], best[0])
+        open_nodes, steps = open_nodes[better], steps[better]
+        if not len(open_nodes):
+            continue
+        seen = shapely.covers(water, shapely.linestrings(np.stack([np.repeat(xy[node][None, :], len(open_nodes), axis=0), xy[open_nodes]], axis=1)))
+        for other, step in zip(open_nodes[seen], steps[seen], strict=True):
+            distance[other] = reached + float(step)
+            previous[other] = node
+            heapq.heappush(heap, (distance[other], int(other)))
+    else:
+        raise RuntimeError("the corner search exceeded its bound")
+    if best[1] < 0:
+        return None
+    path = [best[2]]
+    node = best[1]
+    for _ in range(count):
+        path.append(xy[node])
+        if node == 0:
+            break
+        node = int(previous[node])
+    return path[::-1], best[3]
+
+
+def _route(point: np.ndarray, reach: _Reach, targets: np.ndarray, tree: shapely.STRtree) -> tuple[np.ndarray | None, str, int, LineString]:
+    """A straight spur to the nearest target point if it is valid, else the shortest bent way found.
+
+    Returns the spur's coordinates (None where no way was found), its route, the target's index,
+    and the straight line tried first.
+    """
+    prefix = np.empty((0, 2))
+    start = point
+    if len(reach.dam_xy):
+        away = reach.dam_xy[int(np.argmin(np.hypot(*(reach.dam_xy - point).T)))]
+        radius = float(np.hypot(*(point - away)))
+        if radius < DISC_OUTSIDE_M:
+            # An anchor on a disc's circle (a portage landing at a dam) leaves it straight away from the dam.
+            if radius < DAM_CUT_M - GRID_MOVE_M or radius == 0:
+                return None, "", -1, LineString([point, point])
+            start = away + (point - away) * DISC_OUTSIDE_M / radius
+            prefix = point[None, :]
+    here = Point(start)
+    index = int(tree.nearest(here))
+    tried = shapely.shortest_line(here, targets[index])
+    coords = np.vstack([prefix, shapely.get_coordinates(tried)])
+    if _valid(coords, reach, len(prefix)):
+        return coords, STRAIGHT, index, tried
+    found = _bent(start, reach, targets, tree, prefix)
+    if found is None:
+        return None, "", index, tried
+    return found[0], BENT, found[1], tried
+
+
+def _checked(coords: np.ndarray, reach: _Reach, to_page: Transformer, from_page: Transformer, dam_tree: shapely.STRtree | None) -> dict[str, Any]:
+    """A spur's figures before and after the page's grid; a written vertex the grid put in a dam disc is moved out as 12c does."""
+    line = LineString(coords)
+    step, inland, dry, stray = _dry_after_step(line, reach.local.near(line))
+    written = decoded(coords, to_page, from_page)
+    moved = _off_dams(coords, written, dam_tree, to_page, from_page, None)
+    shift = float(np.hypot(*(moved - written).T).max()) if len(coords) else 0.0
+    decoded_line = LineString(moved)
+    _, _, decoded_dry, decoded_stray = _dry_after_step(decoded_line, reach.local.near(decoded_line))
+    return {
+        "length_m": float(line.length),
+        "bank_step_m": step,
+        "bank_step_inland_m": inland,
+        "dry_m": dry,
+        "stray_m": stray,
+        "decoded_dry_m": decoded_dry,
+        "decoded_stray_m": decoded_stray,
+        "dam_clearance_m": _dam_clearance(moved, reach.dam_xy),
+        "anchor_moved_m": shift,
+        "geometry": decoded_line,
+    }
+
+
+def _unjoined(route: str, length_m: float, at: np.ndarray) -> dict[str, Any]:
+    """The figures of a mouth that needs no line of its own."""
+    return {
+        "route": route,
+        "source": None,
+        "target": None,
+        "target_row": -1,
+        "length_m": length_m,
+        "bank_step_m": 0.0,
+        "bank_step_inland_m": 0.0,
+        "dry_m": 0.0,
+        "stray_m": 0.0,
+        "decoded_dry_m": 0.0,
+        "decoded_stray_m": 0.0,
+        "dam_clearance_m": math.inf,
+        "anchor_moved_m": 0.0,
+        "geometry": Point(at),
+    }
+
+
+def _run_to_line(stream: LineString, at: np.ndarray, reach: _Reach) -> float | None:
+    """How far along the stream, inside its water, from a mouth or end to the first crossing of the line; None where it does not reach it."""
+    if reach.tree is None:
+        return None
+    water = reach.local.near(stream)
+    runs = [g for g in shapely.get_parts(shapely.intersection(stream, water)) if isinstance(g, LineString) and g.length > 0]
+    here = Point(at)
+    for run in runs:
+        start, end = Point(run.coords[0]), Point(run.coords[-1])
+        if min(start.distance(here), end.distance(here)) > 1e-6:
+            continue
+        hits = reach.tree.query(run, predicate="intersects")
+        if not len(hits):
+            return None
+        crossing = shapely.get_coordinates(shapely.intersection(run, shapely.union_all(reach.targets[hits])))
+        if not len(crossing):
+            return None
+        along = np.array([run.project(Point(xy)) for xy in crossing])
+        return float((along if start.distance(here) <= end.distance(here) else run.length - along).min())
+    return None
+
+
+def _stream_mouths(streams: np.ndarray, bodies: Bodies, body_tree: shapely.STRtree, locals_: dict[int, _Local]) -> list[dict[str, Any]]:
+    """Where each class-2 stream piece crosses its body's outline, and its ends that lie inside the water."""
+    rows: list[dict[str, Any]] = []
+    hits = body_tree.query(streams, predicate="intersects")
+    for stream_index in np.unique(hits[0]):
+        line = streams[stream_index]
+        found: dict[tuple[float, float], tuple[int, str]] = {}
+        for body in np.unique(bodies.body[hits[1][hits[0] == stream_index]]):
+            local = locals_[int(body)]
+            water = local.near(line)
+            crossing = shapely.intersection(line, water.boundary)
+            for xy in shapely.get_coordinates(crossing):
+                found.setdefault((float(xy[0]), float(xy[1])), (int(body), MOUTH_KIND))
+            for xy in (np.asarray(line.coords[0])[:2], np.asarray(line.coords[-1])[:2]):
+                end = Point(xy)
+                if shapely.contains(water, end):
+                    found.setdefault((float(xy[0]), float(xy[1])), (int(body), END_KIND))
+        for (x, y), (body, kind) in found.items():
+            rows.append({"stream": int(stream_index), "body": body, "kind": kind, "at": np.array([x, y])})
+    return rows
+
+
+def _interface_lines(body: int, bodies: Bodies, extent: BaseGeometry | None, dam_tree: shapely.STRtree | None) -> list[dict[str, Any]]:
+    """The exact interfaces between a body's lake groups and its other water, once each, cut to the map and the dams."""
+    members = np.flatnonzero(bodies.body == body)
+    owners = bodies.owner[members]
+    lake = np.array([bodies.owners[o][LAKE_BODY] is not None for o in owners], dtype=bool)
+    if lake.all() or not lake.any():
+        return []
+    rows: list[dict[str, Any]] = []
+    other = shapely.union_all(bodies.polygons[members[~lake]])
+    for owner in np.unique(owners[lake]):
+        own = shapely.union_all(bodies.polygons[members[owners == owner]])
+        shared = shapely.intersection(own.boundary, other.boundary)
+        parts = [
+            g
+            for g in shapely.get_parts(shapely.line_merge(shapely.union_all([p for p in shapely.get_parts(shared) if isinstance(p, LineString)])))
+            if isinstance(g, LineString)
+        ]
+        for part in parts:
+            pieces = [part]
+            if extent is not None:
+                pieces = [g for g in shapely.get_parts(shapely.intersection(part, extent)) if isinstance(g, LineString) and g.length > 0]
+            if dam_tree is not None:
+                pieces = [g for piece in pieces for g in _outside_dams(piece, dam_tree)]
+            for piece in pieces:
+                rows.append({"body": body, "owner": int(owner), **bodies.owners[int(owner)], "geometry": piece})
+    return rows
+
+
+def landings(
+    result: Contours,
+    bodies: Bodies,
+    contacts: gpd.GeoDataFrame,
+    *,
+    crs: Any,
+    dams: np.ndarray | None = None,
+    streams: np.ndarray | None = None,
+    extent: BaseGeometry | None = None,
+) -> Landings:
+    """Join every retained contact, stream mouth and lake-owned interface to the line through the water.
+
+    Args:
+        result: The contours and centre network of :func:`contours`, in ``crs``
+        bodies: The eligible water they were built from, in ``crs``
+        contacts: Points where land access meets today's water, in ``crs``: ``roles`` (comma-separated,
+            as 12a's inventory names them), ``surface`` (whether the point lies on today's Shore or
+            Open water rather than on a stream alone), ``anchor`` (its index among the anchors
+            given to :func:`contours`, or -1) and optionally ``through``, the line passing through a
+            crossing contact
+        crs: A metric CRS
+        dams: Dam and lock-gate points in ``crs``
+        streams: Class-2 stream pieces in ``crs``, cut at the dams
+        extent: Map extent in ``crs``
+
+    Returns:
+        The spurs, the mouth joins, the interfaces and their links, and every failure
+    """
+    to_page, from_page = _page_round_trip(crs)
+    dam_points = np.asarray(dams if dams is not None else [], dtype=object)
+    dam_tree = shapely.STRtree(dam_points) if len(dam_points) else None
+    dam_xy = shapely.get_coordinates(dam_points) if len(dam_points) else np.empty((0, 2))
+    body_tree = shapely.STRtree(bodies.polygons)
+    points = contacts.geometry.to_numpy()
+    xy = shapely.get_coordinates(points)
+    # The body of each contact: the nearest water within the bank step, 12c's body where it gave a node.
+    which, polygon = body_tree.query_nearest(points, max_distance=BANK_STEP_M, all_matches=False)
+    body_of = np.full(len(points), -1, dtype=int)
+    body_of[which] = bodies.body[polygon]
+    node_of: dict[int, np.ndarray] = {}
+    if len(result.anchors):
+        kept = result.anchors[result.anchors["kept"].astype(bool)]
+        by_anchor = {int(a): (int(b), shapely.get_coordinates(g)[0]) for a, b, g in zip(kept["anchor"], kept["body"], kept.geometry, strict=True)}
+        for item, anchor in enumerate(contacts["anchor"].to_numpy(dtype=int)):
+            if anchor in by_anchor:
+                body_of[item], node_of[item] = by_anchor[anchor]
+    wanted = set(body_of[body_of >= 0].tolist())
+    stream_rows: list[dict[str, Any]] = []
+    locals_: dict[int, _Local] = {}
+    if streams is not None and len(streams):
+        near_streams = np.unique(body_tree.query(streams, predicate="intersects")[1])
+        wanted |= set(bodies.body[near_streams].tolist())
+    for body in sorted(wanted):
+        locals_[body] = _local(bodies.union(body))
+    if streams is not None and len(streams):
+        stream_rows = _stream_mouths(np.asarray(streams, dtype=object), bodies, body_tree, locals_)
+    drawn_bodies = sorted({int(b) for b in result.lines["body"]} | {int(b) for b in result.centre["body"]})
+    interface_rows = [row for body in drawn_bodies for row in _interface_lines(body, bodies, extent, dam_tree)]
+    wanted |= {row["body"] for row in interface_rows}
+    for body in sorted(wanted - set(locals_)):
+        locals_[body] = _local(bodies.union(body))
+    stream_lines = np.asarray(streams if streams is not None else [], dtype=object)
+    failures: list[dict[str, Any]] = []
+    spur_rows: list[dict[str, Any]] = []
+    mouth_rows: list[dict[str, Any]] = []
+    link_rows: list[dict[str, Any]] = []
+
+    def reach_of(body: int, lines: gpd.GeoDataFrame, centre: gpd.GeoDataFrame) -> _Reach:
+        targets = np.array([*lines.geometry, *centre.geometry], dtype=object)
+        labels = [*(("contour", int(i)) for i in lines.index), *(("centre", int(i)) for i in centre.index)]
+        water = locals_[body].water
+        near = dam_tree.query(water, predicate="dwithin", distance=DAM_CUT_M) if dam_tree is not None else np.empty(0, dtype=int)
+        discs = shapely.union_all(shapely.buffer(dam_points[near], DISC_POLYGON_M, quad_segs=DISC_QUAD_SEGS)) if len(near) else None
+        tree = shapely.STRtree(targets) if len(targets) else None
+        return _Reach(locals_[body], targets, labels, tree, dam_xy[near], discs, dam_tree, to_page, from_page)
+
+    def spur(point: np.ndarray, reach: _Reach, node: np.ndarray | None, detail: str) -> dict[str, Any] | None:
+        if node is not None and _dam_clearance(node[None, :], reach.dam_xy) < DAM_CUT_M:
+            # 12c's node lies on a branch a dam disc cut away: the anchor reaches the body's lines instead.
+            failures.append({"kind": "node in a dam disc", "detail": detail, "geometry": Point(node), "candidate": None})
+            node = None
+        if node is not None:
+            targets = np.array([Point(node)], dtype=object)
+            tree = shapely.STRtree(targets)
+            labels: list[tuple[str, int]] = [("node", -1)]
+        elif reach.tree is not None:
+            targets, tree, labels = reach.targets, reach.tree, reach.labels
+        elif extent is not None and shapely.distance(Point(point), extent.boundary) <= BANK_STEP_M:
+            # Water the map's crop leaves no line of inside the map: the crop, as phase 9 counted such ends.
+            return _unjoined(AT_CROP, 0.0, point)
+        else:
+            failures.append({"kind": "no line", "detail": detail, "geometry": Point(point), "candidate": None})
+            return None
+        index = int(tree.nearest(Point(point)))
+        if shapely.distance(Point(point), targets[index]) <= DRY_NOISE_M:
+            # The line already runs through the anchor: a centre branch ending at the bank corner it stands on.
+            target, target_row = labels[index]
+            return {**_unjoined(ON_LINE, 0.0, point), "target": target, "target_row": target_row}
+        coords, route, index, tried = _route(point, reach, targets, tree)
+        if coords is None and node is not None and reach.tree is not None:
+            # 12c chose the node without the dams: it can lie beyond a disc from its anchor.
+            failures.append({"kind": "node beyond a dam disc", "detail": detail, "geometry": Point(node), "candidate": tried})
+            targets, tree, labels = reach.targets, reach.tree, reach.labels
+            coords, route, index, tried = _route(point, reach, targets, tree)
+        if coords is None:
+            failures.append({"kind": "unresolved", "detail": detail, "geometry": Point(point), "candidate": tried})
+            return None
+        target, target_row = labels[index]
+        # Landing water is the last metres from a bank. A contact out beyond the line, where a way ends
+        # on a skerry the water does not cut out or crosses a lake, reaches it across open water.
+        here = Point(point)
+        open_water = reach.local.water.covers(here) and shapely.distance(here, reach.local.near(here).boundary) > OPEN_BEYOND_M
+        return {
+            "route": route,
+            "source": OPEN_WATER if open_water else LANDING_WATER,
+            "target": target,
+            "target_row": target_row,
+            **_checked(coords, reach, to_page, from_page, dam_tree),
+        }
+
+    reaches: dict[int, _Reach] = {}
+    for body in sorted(wanted):
+        reaches[body] = reach_of(body, result.lines[result.lines["body"] == body], result.centre[result.centre["body"] == body])
+    # Stream mouths first: a phase-9 mouth anchor is mapped to its stream's actual mouth.
+    for row in stream_rows:
+        reach = reaches[row["body"]]
+        along = _run_to_line(stream_lines[row["stream"]], row["at"], reach)
+        if along is not None and along <= BAY_REACH_M:
+            # The stream itself runs on through the water to the line: 12e nodes it where it crosses.
+            mouth_rows.append(
+                {"stream": row["stream"], "body": row["body"], "kind": row["kind"], "at": Point(row["at"]), **_unjoined(CROSSES, along, row["at"])}
+            )
+            continue
+        joined = spur(row["at"], reach, None, f"stream {row['stream']} {row['kind']}")
+        if joined is not None:
+            mouth_rows.append({"stream": row["stream"], "body": row["body"], "kind": row["kind"], "at": Point(row["at"]), **joined})
+    mouth_tree = shapely.STRtree([row["at"] for row in mouth_rows]) if mouth_rows else None
+    roles_of = contacts["roles"].astype(str).to_numpy()
+    surface = contacts["surface"].to_numpy(dtype=bool)
+    through = contacts["through"].to_numpy() if "through" in contacts else np.full(len(contacts), None, dtype=object)
+    for item in range(len(contacts)):
+        roles = set(roles_of[item].split(","))
+        base = {"contact": item, "roles": roles_of[item], "body": int(body_of[item]), "node": None}
+        blank = {"route": None, "source": None, "target": None, "target_row": -1, "length_m": 0.0, "bank_step_m": 0.0, "bank_step_inland_m": 0.0}
+        blank["dry_m"] = 0.0
+        blank |= {"stray_m": 0.0, "decoded_dry_m": 0.0, "decoded_stray_m": 0.0, "dam_clearance_m": math.inf, "anchor_moved_m": 0.0}
+        blank["geometry"] = points[item]
+        if not surface[item] or roles == {STREAM_CROSSING_ROLE}:
+            # A stream's own line is not surface geometry: it stays as it is, joined at its mouths, and so does this contact.
+            spur_rows.append({**base, **blank, "route": ON_STREAM})
+            continue
+        if roles == {CROP_ROLE}:
+            spur_rows.append({**base, **blank, "route": AT_CROP})
+            continue
+        if body_of[item] < 0:
+            failures.append({"kind": "no body", "detail": f"contact {item} ({roles_of[item]})", "geometry": points[item], "candidate": None})
+            continue
+        reach = reaches[int(body_of[item])]
+        if roles <= CROSSING_ROLES:
+            if through[item] is not None and reach.tree is not None and len(reach.tree.query(through[item], predicate="intersects")):
+                spur_rows.append({**base, **blank, "route": CROSSES})
+                continue
+            here = Point(xy[item])
+            if reach.local.water.covers(here) and shapely.distance(here, reach.local.near(here).boundary) > OPEN_BEYOND_M:
+                # A ferry or way over open water crossed an old chord here, far from any bank: not a way
+                # to the water but over it, which 12e's open-water chords will cross in their turn.
+                spur_rows.append({**base, **blank, "route": OVER_WATER})
+                continue
+        if roles == {MOUTH_ROLE} and mouth_tree is not None:
+            nearest, gap_m = mouth_tree.query_nearest(points[item], max_distance=MOUTH_MATCH_M, return_distance=True, all_matches=False)
+            if len(nearest) and mouth_rows[int(nearest[0])]["body"] == body_of[item]:
+                # The distance to the mouth, along no line: the stream carries the anchor there.
+                spur_rows.append({**base, **blank, "route": AT_MOUTH, "target": "mouth", "target_row": int(nearest[0]), "length_m": float(gap_m[0])})
+                continue
+        node = node_of.get(item)
+        joined = spur(xy[item], reach, node, f"contact {item} ({roles_of[item]})")
+        if joined is not None:
+            spur_rows.append({**base, **joined, "node": None if node is None else Point(node)})
+    # Interfaces: kept once, lake-owned; the pieces ending on them meet them, a side none meets gets a link.
+    interfaces: list[dict[str, Any]] = []
+    for index, row in enumerate(interface_rows):
+        body = row["body"]
+        line = row["geometry"]
+        ends: list[tuple[np.ndarray, bool]] = []
+        for drawn in (result.lines, result.centre):
+            own = drawn[(drawn["body"] == body) & ((drawn["start"] == INTERFACE) | (drawn["end"] == INTERFACE))]
+            for raw, start, end, lake_body in zip(own["raw"], own["start"], own["end"], own[LAKE_BODY], strict=True):
+                coords = shapely.get_coordinates(raw)
+                for kind, xy_end in ((start, coords[0]), (end, coords[-1])):
+                    if kind == INTERFACE and shapely.distance(Point(xy_end), line) < 1e-6:
+                        ends.append((xy_end, lake_body == row[LAKE_BODY]))
+        lake_side = sum(1 for _, is_lake in ends if is_lake)
+        other_side = len(ends) - lake_side
+        interfaces.append(
+            {
+                "body": body,
+                LAKE_BODY: row[LAKE_BODY],
+                LAKE_LEVEL: row[LAKE_LEVEL],
+                SURFACE_CLASS: row[SURFACE_CLASS],
+                "lake_side": lake_side,
+                "other_side": other_side,
+                "meets": shapely.multipoints([xy_end for xy_end, _ in ends]) if ends else None,
+                "geometry": line,
+            }
+        )
+        reach = reaches[body]
+        for side, met in (("lake", lake_side), ("other", other_side)):
+            if met:
+                continue
+            is_lake = side == "lake"
+            chosen = [
+                i
+                for i, (kind, frame_row) in enumerate(reach.labels)
+                if ((result.lines if kind == "contour" else result.centre).loc[frame_row, LAKE_BODY] == row[LAKE_BODY]) == is_lake
+            ]
+            if not chosen:
+                failures.append(
+                    {
+                        "kind": "interface side without line",
+                        "detail": f"interface {index}, {side} side",
+                        "geometry": line.interpolate(0.5, normalized=True),
+                        "candidate": None,
+                    }
+                )
+                continue
+            targets = reach.targets[chosen]
+            tree = shapely.STRtree(targets)
+            start = shapely.get_coordinates(shapely.shortest_line(line, targets[int(tree.nearest(line))]))[0]
+            way, route, target, tried = _route(start, reach, targets, tree)
+            if way is None:
+                failures.append({"kind": "unresolved", "detail": f"interface {index}, {side} side", "geometry": Point(start), "candidate": tried})
+                continue
+            kind, frame_row = reach.labels[chosen[target]]
+            link = {"interface": index, "side": side, "route": route, "source": OPEN_WATER, "target": kind, "target_row": frame_row}
+            link_rows.append({**link, **_checked(way, reach, to_page, from_page, dam_tree)})
+
+    def frame(records: list[dict[str, Any]], columns: list[str]) -> gpd.GeoDataFrame:
+        return gpd.GeoDataFrame(pd.DataFrame(records, columns=columns), geometry="geometry", crs=crs)
+
+    checks = [
+        "route",
+        "source",
+        "target",
+        "target_row",
+        "length_m",
+        "bank_step_m",
+        "bank_step_inland_m",
+        "dry_m",
+        "stray_m",
+        "decoded_dry_m",
+        "decoded_stray_m",
+        "dam_clearance_m",
+        "anchor_moved_m",
+        "geometry",
+    ]
+    mouths = frame(mouth_rows, ["stream", "body", "kind", "at", *checks])
+    mouths["at"] = gpd.GeoSeries(mouths["at"], crs=crs)
+    faults = frame(failures, ["kind", "detail", "candidate", "geometry"])
+    faults["candidate"] = gpd.GeoSeries(faults["candidate"], crs=crs)
+    return Landings(
+        spurs=frame(spur_rows, SPUR_COLUMNS),
+        mouths=mouths,
+        interfaces=frame(interfaces, ["body", LAKE_BODY, LAKE_LEVEL, SURFACE_CLASS, "lake_side", "other_side", "meets", "geometry"]),
+        links=frame(link_rows, ["interface", "side", *checks]),
+        failures=faults,
+    )

@@ -957,6 +957,95 @@ On each of 12a's twelve frozen patches the whole chain was run from the surfaces
 identical, the bank's frames the sources' own, and portages, ties and launches identical. The
 launch counts are the frozen baseline's 350 / 2,220 / 1,825.
 
+**Stopped 2026-09-27 — 12d-2: every contact reaches the line, and phase 7's directions do not
+survive the new splitting.** `paddle_geometry.landings` and its tests; one guard in 12c's
+`_layout` (a round lake with no closed-off water gave the middle nothing to look for and raised).
+Nothing is wired: no graph, page, tile or browser run, no new dependency. Evidence, scripts and
+frames are in scratch, `~/mockups/kayak-mode/offset-plan/phase-12d/` (`README.md` first).
+
+*What it draws.* For each contact of 12a's inventory, on its body's contour and centre lines: a
+**Landing water** spur from the retained point, straight to the nearest line point where that lies
+in the body's own water clear of every dam disc, else bent round the bank's corners (a visibility
+search in growing windows); to 12c's node where 12c mapped the anchor, unless the node lies inside
+or beyond a dam disc (237 in Malingsbo-Kloten, all reported). A contact on a stream alone stays on
+its stream; a way over the water that crosses the new lines is noded where it crosses; a pure mouth
+contact is its stream's mouth. For each class-2 stream: where it actually meets its body's water,
+and where it ends inside it, a join to the line, unless the stream itself runs on through the water
+to the line within 2d. For each body with lake and other water: every exact lake-owned interface
+once, with the points where contour and centre pieces end on it (for 12e to node) and an Open water
+link into a side no piece meets. Every line is checked before and after the page's grid.
+
+| Whole map, geometry only | Abisko | Malingsbo-Kloten | Lomsdal-Visten |
+|---|---:|---:|---:|
+| Contacts / unresolved | 5,748 / 0 | 14,343 / 0 | 10,729 / 0 |
+| Landing water spurs / km; median / p95 / max m | 3,578 / 25.347; 6.5 / 15.6 / 38.8 | 8,768 / 72.742; 8.4 / 16.4 / 42.1 | 8,894 / 75.942; 9.9 / 16.3 / 23.1 |
+| of them bent (all lines) | 19 | 456 | 211 |
+| Open water from contacts beyond the line / max m | 14 / 7.3 | 44 / 16.4 | 44 / 1,581.5 |
+| Launch spurs / km; max m | 350 / 3.292; 19.4 | 2,220 / 19.852; 19.7 | 1,824 / 16.680; 19.7 |
+| Carry spurs / km; max m | 722 / 3.510; 38.8 | 1,232 / 7.493; 42.1 | 1,825 / 7.329; 19.6 |
+| Mapped ways at a bank / max m | 258 / 18.3 | 677 / 21.7 | 501 / 22.8 |
+| Stream mouths and ends: joined / the stream's own crossing | 139 / 389 | 213 / 607 | – |
+| Dam-side contacts / spur max m | – | 555 / 24.4 | – |
+| Bridges to water / to land / at the crop | 2,519 / 132 / 122 | 4,644 / 759 / 146 | 4,329 / 1,051 / 189 |
+| Interfaces / met on both sides / links | 120 / 120 / 0 | 137 / 136 / 2 (9.4, 11.7 m) | 0 |
+| Least written dam clearance m; lines inside a disc | – | 25.0002; 0 | – |
+| Dry beyond the bank step, total m (farthest off the water): before / after the grid | 0 / 0.32 (0.07) | 2.70 (0.07) / 8.42 (0.09) | 5.89 (0.07) / 18.50 (0.08) |
+| Landings s (× baseline build) / cumulative with 12c-2's geometry | 8.9 (0.055×) / 0.989× | 22.8 (0.059×) / 0.692× | 23.7 (0.023×) / 0.815× |
+| Peak RSS MB, 4 GiB cap | 733 | 830 | 2,236 |
+
+Contacts count nodes of the frozen graph, a node once however many roles it has; per role and the
+longest examples with coordinates are in `whole-<map>.json`. The longest Landing water spurs are
+carries landing on slivers of water at the map's crop (Abisko 18.665796 68.139676, 38.8 m;
+Malingsbo-Kloten 14.967 60.05324, 42.1 m, bent). The three repaired Malingsbo-Kloten stream joins of
+phase 9 are stream ends inside the water, joined by 0.06, 0.26 / 0.12 and 7.07 / 7.02 m. On the
+twelve patches every contact resolves too (`report.md`).
+
+*Prices.* The land part of every launch and carry is 12d-1's, byte for byte; the water spurs are
+separate PADDLE lines at factor 1 and add nothing to a land price. A launch keeps phase 10's ≤ 30 m
+to the bank: the synthetic road end 25 m from the bank still launches, and its spur is 15 m more
+water. A two-ended carry keeps its chord and gains a spur at each end.
+
+*Implementation choices, not Uwe's — for review:*
+- **The bank step.** A retained anchor lies on phase 9's 5 m bank, up to 5.1 m off the water: a spur
+  may run over that land from its anchor to the water, no longer than the anchor's own distance plus
+  0.5 m; where a dam's disc covers the nearest water, it may go round the disc (up to 10.2 m, never
+  more than 5.1 m off the water; largest 5.61 m long, 4.91 m off). 1,352 / 3,765 / 4,091 spurs start
+  on land. Beyond that step a spur may stray only by the page's 0.1 m.
+- **Open water beyond the line.** A contact more than 17.1 m (d + 2.1) inside the water — an old
+  open-water chord's end at a dam, a bridge to a path on land the water does not cut out — is joined
+  by Open water at 1.5, not Landing water: it is not the last metres from a bank. Seven such links in
+  Lomsdal-Visten run 67–1,582 m straight across open water (bridges to paths on skerries, e.g.
+  12.096367 65.632495), contained, priced as today's chords.
+- **Not joined.** Bridges joining a line the map's crop cut to its neighbour (109 / 114 / 176, as
+  phase 9 kept crop ends out of the landing audit); water with no line inside the map, on the crop
+  (a carry in Malingsbo-Kloten, a launch in Lomsdal-Visten); 433 Lomsdal-Visten points where a
+  ferry crossed an old chord far out in open water (a way over the water, which 12e's chords will
+  cross).
+- Dam anchors are stepped straight out of their disc before routing; the bent search avoids each disc
+  drawn a grid move wider; a written vertex the grid still puts inside is moved out by 12c's rule
+  (278 in Malingsbo-Kloten, at most 0.125 m, all on page-rounded inventory points).
+
+*The stop: phase 7 across the new splitting.* Phase 7's gate sums each stream edge's quarter-median
+fall, so it reads how a chain is cut, and every line that crosses or joins a stream cuts it anew.
+Read off the frozen heights (`phase7.py`, which first reproduces every chain's `one_way` in the
+graph, 311 / 311 and 345 / 345): with the old nodes that survive, 12b–12d's crossings and 12d's
+joins, **28 Malingsbo-Kloten chains (10.41 km) change direction** — 18 one way → open, 10 open → one
+way, falls moving by up to 3.16 m on streams through river surfaces — and none in Abisko. 12d's own
+spurs and joins alone, on today's splits, flip one (`streams-536083-6655768-253`, 0.3224 m against
+0.3000 m). Deciding on each stream's own nodes flips 44, on the whole chain 43. 12e's chords are not
+in the figure and will cut more. **What keeps every decision:** decide on today's splitting, which the
+explicit bank now reproduces — node the streams against `Bank`'s lines for the gate alone and carry
+each chain's decision to the new edges. That is a change to how the build decides direction, for
+Uwe or review to choose before 12e; no rule is changed here.
+
+*What 12e must know.* Insert each spur's end, each interface's meeting points and each mouth join's
+point into the line it lands on (shared coordinates). The anchors here are the published graph's
+nodes; the build must make them itself — launch and carry ends from the bank, ways noded against the
+bank, stream mouths, dam-side ends — and **bridges are inferred by the graph build from loose ends**:
+a loose end that bridged to the old bank must reach its spur's anchor, not whatever lies nearest.
+The land side of a dam anchor must be written by the same out-of-the-disc rule as its spur. 12c maps
+anchors to nodes without the dams; 237 of Malingsbo-Kloten's lie inside or beyond a disc.
+
 ### Phase 12e — Integrate sources, chords and encoded roles
 
 *Files:* `water.py`, `routing/sources.py` only if attributes require it,

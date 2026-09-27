@@ -2,6 +2,7 @@
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import pytest
 import shapely
 from shapely.geometry import LineString, Point, Polygon, box
@@ -439,3 +440,232 @@ def test_the_water_of_a_cell_answers_as_the_whole_body_does():
     assert np.array_equal(local.covers(lines), shapely.covers(lake, lines))
     points = np.asarray(shapely.points(np.r_[outward[::13], inward[::17], [[X0 + 5000.0, Y0]]]), dtype=object)
     assert np.array_equal(local.distance(points), shapely.distance(points, lake))
+
+
+# Phase 12d: the last metres from the bank to the line.
+
+
+def contacts(*points: Point, roles: str = "launch", anchors: list[int] | None = None, surface: bool = True) -> gpd.GeoDataFrame:
+    """Contacts as 12a's inventory names them; each is also the anchor of that index unless told otherwise."""
+    return gpd.GeoDataFrame(
+        {"roles": [roles] * len(points), "surface": [surface] * len(points), "anchor": anchors if anchors is not None else list(range(len(points)))},
+        geometry=list(points),
+        crs=CRS,
+    )
+
+
+def only_lines(*lines: LineString) -> pg.Contours:
+    """A contour result holding nothing but the given lines, as if every centre branch near them were pruned."""
+    frame = gpd.GeoDataFrame(
+        {
+            "body": [0] * len(lines),
+            "start": [pg.RING] * len(lines),
+            "end": [pg.RING] * len(lines),
+            water.LAKE_BODY: ["lake-0"] * len(lines),
+            "raw": list(lines),
+        },
+        geometry=list(lines),
+        crs=CRS,
+    )
+    empty = gpd.GeoDataFrame({"body": [], "start": [], "end": [], water.LAKE_BODY: [], "raw": []}, geometry=[], crs=CRS)
+    anchors = gpd.GeoDataFrame({"anchor": [], "body": [], "kept": []}, geometry=[], crs=CRS)
+    blank = gpd.GeoDataFrame(geometry=[], crs=CRS)
+    return pg.Contours(frame, blank, blank, pd.DataFrame(), blank, empty, blank, blank, anchors, CRS)
+
+
+def assert_in_water(landed: pg.Landings, water_area) -> None:
+    """No spur, mouth join or link lies over land beyond its anchor's bank step, before or after the page's grid."""
+    for frame in (landed.spurs, landed.mouths, landed.links):
+        drawn = frame[frame["source"].notna()]
+        assert (drawn["bank_step_m"] <= pg.BANK_STEP_M).all()
+        assert (drawn["stray_m"] <= pg.EXCURSION_M).all() and (drawn["decoded_stray_m"] <= pg.EXCURSION_M).all()
+        for line, step in zip(drawn.geometry, drawn["bank_step_m"], strict=True):
+            assert shapely.difference(line, water_area).length <= step + 0.1
+
+
+def test_a_launch_25_m_from_the_bank_keeps_its_land_reach_and_gains_its_water_spur():
+    from trails.network.launches import launches
+    from trails.routing.graph import build_network
+    from trails.routing.sources import NetworkSource
+
+    lake = at(0, 0, 400, 200)
+    surfaces = gpd.GeoDataFrame(geometry=[lake], crs=CRS)
+    paddled = water.paddle(surfaces, metric_crs=CRS)
+    road = NetworkSource("road", gpd.GeoDataFrame(geometry=[LineString([(X0 + 200, Y0 - 100), (X0 + 200, Y0 - 25)])], crs=CRS))
+    tie = launches(paddled.bank, build_network([road], bridge_m=0, metric_crs=CRS), water.Access(surfaces, bank=paddled.bank)).gdf
+    # Phase 10's reach is to the bank: 25 m, well inside 30, though the line lies 40 m from the road end.
+    assert len(tie) == 1 and tie.length.iloc[0] == pytest.approx(25)
+    anchor = Point(tie.geometry.iloc[0].coords[-1])
+    found = bodies(lake)
+    landed = pg.landings(pg.contours(found, crs=CRS, anchors=np.array([anchor])), found, contacts(anchor), crs=CRS)
+    spur = landed.spurs.iloc[0]
+    assert (spur["route"], spur["source"], spur["target"]) == (pg.STRAIGHT, pg.LANDING_WATER, "contour")
+    assert spur["length_m"] == pytest.approx(15, abs=0.1)
+    # The water spur is added; the land part is the same tie, at the same path price.
+    assert tie.geometry.iloc[0].equals(LineString([(X0 + 200, Y0 - 25), (X0 + 200, Y0)]))
+    assert_in_water(landed, lake)
+
+
+def test_a_two_ended_carry_keeps_its_land_part_and_gains_a_spur_at_each_end():
+    from trails.routing.graph import build_network
+    from trails.routing.sources import NetworkSource
+
+    # A round lake beside a square one: the carry lands mid-bank on both, not at a corner, where a
+    # kept corner branch of the middle would already reach the anchor.
+    lakes = [at(0, 0, 200, 200), Point(X0 + 400, Y0 + 100).buffer(100, quad_segs=64)]
+    surfaces = gpd.GeoDataFrame(geometry=lakes, crs=CRS)
+    paddled = water.paddle(surfaces, metric_crs=CRS)
+    walking = build_network([NetworkSource("path", gpd.GeoDataFrame(geometry=[], crs=CRS))], metric_crs=CRS)
+    chord = water.portages(paddled.bank, walking)[0].gdf.geometry.iloc[0]
+    assert chord.length == pytest.approx(100)
+    ends = [Point(chord.coords[0]), Point(chord.coords[-1])]
+    found = bodies(*lakes)
+    landed = pg.landings(pg.contours(found, crs=CRS, anchors=np.array(ends)), found, contacts(*ends, roles="portage"), crs=CRS)
+    assert list(landed.spurs["route"]) == [pg.STRAIGHT, pg.STRAIGHT]
+    # 15 m; on the round lake the 2 m contour's chord between two kept vertices lies 0.196 m farther in.
+    assert landed.spurs["length_m"].to_numpy() == pytest.approx([15, 15], abs=0.25)
+    assert landed.spurs["body"].nunique() == 2
+    # Each spur starts at its end of the carry: the carry is not lengthened, the spurs are paddled.
+    for spur, end in zip(landed.spurs.geometry, ends, strict=True):
+        assert Point(spur.coords[0]).distance(end) < 0.07
+    assert water.portages(paddled.bank, walking)[0].gdf.geometry.iloc[0].equals(chord)
+    assert_in_water(landed, shapely.union_all(lakes))
+
+
+def test_an_inlet_reaches_its_own_centre_line_or_bends_round_its_corner():
+    lake = at(0, 0, 300, 300)
+    inlet = shapely.union_all([at(300, 140, 380, 160), at(360, 160, 380, 260)])
+    water_area = shapely.union_all([lake, inlet])
+    anchor = Point(X0 + 370, Y0 + 260)
+    found = bodies(water_area)
+    landed = pg.landings(pg.contours(found, crs=CRS, anchors=np.array([anchor])), found, contacts(anchor), crs=CRS)
+    spur = landed.spurs.iloc[0]
+    # The inlet's own middle, never the lake's line across the land between them.
+    assert spur["target"] in ("node", "centre") and spur["length_m"] < 15
+    assert_in_water(landed, water_area)
+    # With no middle in the inlet, the straight line to the lake's contour crosses land: the spur bends round the corner.
+    contour = at(15, 15, 285, 285).exterior
+    alone = pg.landings(only_lines(contour), found, contacts(anchor, anchors=[-1]), crs=CRS)
+    bent = alone.spurs.iloc[0]
+    assert bent["route"] == pg.BENT
+    assert shapely.get_num_coordinates(bent.geometry) > 2
+    assert shapely.shortest_line(anchor, contour).difference(water_area).length > 10
+    assert_in_water(alone, water_area)
+
+
+def test_an_anchor_behind_an_island_goes_round_it_and_never_across():
+    island = at(150, 5, 250, 60)
+    lake = Polygon(at(0, 0, 400, 300).exterior.coords, holes=[island.exterior.coords])
+    anchor = Point(X0 + 200, Y0)
+    target = LineString([(X0 + 100, Y0 + 80), (X0 + 300, Y0 + 80)])
+    found = bodies(lake)
+    landed = pg.landings(only_lines(target), found, contacts(anchor, anchors=[-1]), crs=CRS)
+    spur = landed.spurs.iloc[0]
+    assert shapely.shortest_line(anchor, target).intersects(island)
+    assert spur["route"] == pg.BENT and not spur.geometry.crosses(island) and spur.geometry.intersection(island).length < 0.1
+    assert_in_water(landed, lake)
+
+
+def test_a_stream_mouth_joins_its_own_body_and_leaves_both_directions_as_phase_7_decided():
+    from trails.routing.elevation import with_elevation
+    from trails.routing.graph import build_network
+    from trails.routing.sources import PADDLE, NetworkSource
+
+    lakes = [at(0, 0, 300, 300), at(500, 0, 800, 300)]
+    # A falling stream into the west lake that stops at its bank, and a level channel between the two lakes.
+    falling = LineString([(X0 + 150, Y0 - 300), (X0 + 150, Y0)])
+    channel = LineString([(X0 + 300, Y0 + 150), (X0 + 500, Y0 + 150)])
+    found = bodies(*lakes)
+    landed = pg.landings(
+        pg.contours(found, crs=CRS), found, contacts(Point(X0 + 150, Y0), roles="mouth", anchors=[-1]), crs=CRS, streams=np.array([falling, channel])
+    )
+    mouths = landed.mouths
+    assert sorted(mouths["kind"]) == [pg.MOUTH_KIND] * 3
+    assert (mouths["source"] == pg.LANDING_WATER).all() and mouths["length_m"].to_numpy() == pytest.approx([15, 15, 15], abs=0.1)
+    assert landed.spurs.iloc[0]["route"] == pg.AT_MOUTH
+    joins = gpd.GeoDataFrame(geometry=list(mouths.geometry), crs=CRS)
+
+    def decisions(extra: list[NetworkSource]) -> dict[str, bool]:
+        streams = NetworkSource(water.STREAMS, gpd.GeoDataFrame(geometry=[falling, channel], crs=CRS), kind=PADDLE, directed=True, keep_whole=True)
+        # The stream falls 0.1 m in every metre toward the lake; the channel is level.
+        network = with_elevation(
+            build_network([streams, *extra], metric_crs=CRS, bridge_m=0), lambda xy: np.where(xy[:, 1] < Y0, -(xy[:, 1] - Y0) * 0.1, 0.0)
+        )
+        opened = water.open_level_streams(network).edges
+        own = opened[opened["source"] == water.STREAMS]
+        return {
+            "falling": bool(own.loc[own.geometry.bounds["maxy"] <= Y0 + 1e-6, "one_way"].all()),
+            "channel": bool(own.loc[own.geometry.bounds["miny"] > Y0, "one_way"].any()),
+        }
+
+    alone = decisions([])
+    joined = decisions([NetworkSource(pg.LANDING_WATER, joins, kind=PADDLE, keep_whole=True)])
+    assert alone == joined == {"falling": True, "channel": False}
+    assert_in_water(landed, shapely.union_all(lakes))
+
+
+def test_a_lake_owned_interface_is_kept_once_at_the_lake_plane_and_met_on_both_sides():
+    lake, river = at(0, 0, 300, 300), at(300, 130, 600, 170)
+    found = bodies(lake, river, classes=["lake", "river"], levels=["207", None])
+    landed = pg.landings(pg.contours(found, crs=CRS), found, contacts(), crs=CRS)
+    interfaces = landed.interfaces
+    assert len(interfaces) == 1
+    row = interfaces.iloc[0]
+    assert row.geometry.equals(LineString([(X0 + 300, Y0 + 130), (X0 + 300, Y0 + 170)])) or row.geometry.equals(
+        LineString([(X0 + 300, Y0 + 170), (X0 + 300, Y0 + 130)])
+    )
+    assert row[water.LAKE_LEVEL] == 207 and row[water.LAKE_BODY] is not None
+    # The contour crosses it once on each bank, from each side: four ends, no link needed, no river copy.
+    assert (row["lake_side"], row["other_side"]) == (2, 2) and landed.links.empty
+    assert len(shapely.get_parts(row["meets"])) == 4
+
+
+def test_a_dam_blocks_every_spur_and_its_side_keeps_its_landing():
+    lakes_and_river = shapely.union_all([at(0, 0, 300, 300), at(300, 120, 700, 180), at(700, 0, 1000, 300)])
+    dam = Point(X0 + 500, Y0 + 150)
+    # A carry's landing on each side of the disc, on its circle 8 m off the bank, as phase 9's cut leaves them.
+    side = float(np.sqrt(water.DAM_CUT_M**2 - 22.0**2))
+    ends = [Point(X0 + 500 - side, Y0 + 128), Point(X0 + 500 + side, Y0 + 128)]
+    found = bodies(lakes_and_river)
+    result = pg.contours(found, crs=CRS, dams=np.array([dam]), anchors=np.array(ends))
+    landed = pg.landings(result, found, contacts(*ends, roles="portage,dam_side"), crs=CRS, dams=np.array([dam]))
+    spurs = landed.spurs
+    assert len(spurs) == 2 and spurs["source"].eq(pg.LANDING_WATER).all()
+    assert (spurs["dam_clearance_m"] >= water.DAM_CUT_M).all()
+    for spur, end in zip(spurs.geometry, ends, strict=True):
+        # Its own side: the spur never passes the dam, and nothing of it enters the disc.
+        assert shapely.distance(spur, dam) >= water.DAM_CUT_M - 1e-6
+        assert (shapely.get_coordinates(spur)[:, 0] - dam.x).mean() * (end.x - dam.x) > 0
+    assert_in_water(landed, lakes_and_river)
+
+
+def test_no_spur_link_or_mouth_join_lies_over_land():
+    island = at(120, 120, 180, 180)
+    lake = Polygon(at(0, 0, 300, 300).exterior.coords, holes=[island.exterior.coords])
+    river = at(300, 130, 600, 170)
+    found = bodies(lake, river, classes=["lake", "river"], levels=["207", None])
+    stream = LineString([(X0 + 450, Y0 + 400), (X0 + 450, Y0 + 170)])
+    points = [Point(X0 + 150, Y0), Point(X0 + 150, Y0 + 120), Point(X0 + 450, Y0 + 130), Point(X0 + 0, Y0 + 290), Point(X0 + 450, Y0 + 170)]
+    result = pg.contours(found, crs=CRS, anchors=np.array(points))
+    landed = pg.landings(result, found, contacts(*points, roles="walking_bank"), crs=CRS, streams=np.array([stream]))
+    assert landed.failures.empty
+    assert landed.spurs["source"].eq(pg.LANDING_WATER).all() and len(landed.mouths) == 1
+    assert_in_water(landed, shapely.union_all([lake, river]))
+
+
+def test_a_round_lake_the_offset_carries_everywhere_needs_no_middle():
+    # No corner, no closed-off water, no jump: the middle has nothing to look for, and must not fail.
+    result = pg.contours(bodies(Point(X0 + 400, Y0 + 100).buffer(100, quad_segs=64)), crs=CRS)
+    assert len(result.lines) == 1 and result.centre.empty
+    assert_gates(result)
+
+
+def test_a_contact_out_in_the_lake_reaches_the_line_across_open_water_not_landing_water():
+    # A path's end on a skerry the lake does not cut out, 60 m from any bank: not the last metres from a bank.
+    lake = at(0, 0, 400, 300)
+    found = bodies(lake)
+    near_bank, far_out = Point(X0 + 200, Y0), Point(X0 + 200, Y0 + 60)
+    result = pg.contours(found, crs=CRS, anchors=np.array([near_bank, far_out]))
+    landed = pg.landings(result, found, contacts(near_bank, far_out, roles="bridge_land"), crs=CRS)
+    assert list(landed.spurs["source"]) == [pg.LANDING_WATER, water.OPEN_WATER]
+    assert landed.spurs["length_m"].to_numpy() == pytest.approx([15, 45], abs=0.1)
