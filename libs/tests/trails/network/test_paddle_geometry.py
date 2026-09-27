@@ -4,7 +4,7 @@ import geopandas as gpd
 import numpy as np
 import pytest
 import shapely
-from shapely.geometry import LineString, Point, box
+from shapely.geometry import LineString, Point, Polygon, box
 from trails.network import paddle_geometry as pg
 from trails.network import water
 
@@ -402,3 +402,40 @@ def test_a_river_joined_through_a_pinch_narrower_than_a_step_is_one_centre_line(
     xs = shapely.get_coordinates(result.centre.geometry.to_numpy())[:, 0] - X0
     assert xs.min() < 1 and xs.max() > 599
     assert not (result.failures["kind"].isin(["middle", "dry", "isolated"])).any()
+
+
+def test_the_exact_distance_from_a_line_is_the_one_its_segment_tree_returns():
+    # The validation reads a run's distance through its segments' envelopes and GEOS's own formula;
+    # it must be the tree's figure bit for bit, on vertices, on segments and beside repeated vertices.
+    rng = np.random.default_rng(12)
+    steps = rng.normal(0, 1.5, (400, 2))
+    steps[::37] = 0.0
+    run = np.cumsum(steps, axis=0) + [X0, Y0]
+    points = run[rng.integers(0, len(run), 2000)] + rng.normal(0, 3, (2000, 2))
+    points[:50] = run[:50]
+    points[50:100] = (run[:50] + run[1:51]) / 2
+    (_, _), expected = shapely.STRtree(shapely.linestrings(np.stack([run[:-1], run[1:]], axis=1))).query_nearest(
+        shapely.points(points), return_distance=True, all_matches=False
+    )
+    found = pg._SegmentIndex.of(run).distance(points, rng.integers(0, len(run) - 1, len(points)))
+    assert np.array_equal(found.view(np.int64), expected.view(np.int64))
+
+
+def test_the_water_of_a_cell_answers_as_the_whole_body_does():
+    # A wavy lake of 20,000 vertices; short lines ending on its bank are asked of their cells,
+    # long ones of the whole body; distances within a cell's margin come from the cell.
+    angle = np.linspace(0, 2 * np.pi, 20_001)[:-1]
+    radius = 3000 + 40 * np.sin(angle * 300)
+    lake = Polygon(np.c_[X0 + radius * np.cos(angle), Y0 + radius * np.sin(angle)])
+    shapely.prepare(lake)
+    local = pg._local(lake)
+    bank = shapely.get_coordinates(lake.exterior)[:-1]
+    inward = bank + (np.c_[X0, Y0] - bank) * 0.004
+    outward = bank - (np.c_[X0, Y0] - bank) * 0.004
+    lines = np.asarray(
+        [*shapely.linestrings(np.stack([inward, bank], axis=1))[::7], *shapely.linestrings(np.stack([outward, bank], axis=1))[::11]], dtype=object
+    )
+    lines = np.append(lines, LineString([bank[0], bank[5000]]))
+    assert np.array_equal(local.covers(lines), shapely.covers(lake, lines))
+    points = np.asarray(shapely.points(np.r_[outward[::13], inward[::17], [[X0 + 5000.0, Y0]]]), dtype=object)
+    assert np.array_equal(local.distance(points), shapely.distance(points, lake))

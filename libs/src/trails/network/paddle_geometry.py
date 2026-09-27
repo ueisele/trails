@@ -40,6 +40,7 @@ an open-water crossing, not shore.
 
 import math
 import time
+from collections import OrderedDict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -148,6 +149,20 @@ OVERSTATEMENT_M = 0.1
 BANK_END_HALVINGS = 3
 #: The growth of the medial windows when a kept branch runs out of them.
 MAX_GROWTH_ROUNDS = 3
+#: Implementation choice (phase 12c-2): predicates on short lines at the bank read the water of a
+#: cell of this side, plus this margin, cut from blocks of this many cells a side; see ``_Local``.
+LOCAL_CELL_M = 1000.0
+LOCAL_MARGIN_M = 100.0
+LOCAL_BLOCK_CELLS = 8
+#: Below this many vertices a polygon is asked whole: cutting it into cells would cost more than it saves.
+LOCAL_MIN_VERTICES = 20_000
+#: The most prepared cells kept at once; a cell is cut again from its block when it is needed after that.
+LOCAL_CELLS_KEPT = 64
+#: The most medial layouts a body keeps between passes. A sea's keep region is 834,000 vertices, prepared;
+#: a layout met again is rebuilt from the kept buffers and regions, which is the cheap part of it.
+LAYOUTS_KEPT = 1
+#: Seeds with fewer vertices are tested unprepared: a sea has 39,000 of them, mostly small discs.
+PREPARED_SEED_VERTICES = 256
 
 SHORE_ROLE = "shore"
 CAP_ROLE = "cap"
@@ -181,7 +196,8 @@ class Contours:
         bodies: One row per body: parts, vertices, timings, the medial construction's figures
         failures: Anything the gates or the water could not settle, with a location.
             Gates: ``gate`` (contour), ``middle``, ``dry``, ``dam``, ``crossing``,
-            ``join``, ``isolated``, ``window``, ``cap not kept``, ``invalid water``.
+            ``join``, ``isolated``, ``window``, ``cap not kept``, ``invalid water``,
+            ``seam`` (two tiles disagree about the middle beside a kept line).
             Reported for later phases: ``contact`` (two written lines within the
             grid's reach of each other), ``speck``, ``source edge``, ``anchor
             without branch``, ``cap dropped`` (a phase-12b anchored cap no kept
@@ -426,6 +442,7 @@ def _body(
     bank_tree = shapely.STRtree(bank.lines)
     owners = _owners(polygons, owner)
     shapely.prepare(water)
+    local = _local(water)
     rings = [np.asarray(ring.coords)[:, :2] for part in parts for ring in (part.exterior, *part.interiors)]
     if parts:
         closed = _residue(water, parts, offset_m=offset_m, quad_segs=quad_segs, anchors=anchors)
@@ -445,7 +462,20 @@ def _body(
         seeds = [water]
     centre_started = time.perf_counter()
     network = _network(
-        body, water, bank, bank_tree, seeds, specks, closed, anchors, rings, offset_m=offset_m, step=sample_m, tile_m=tile_m, failures=failures
+        body,
+        water,
+        bank,
+        bank_tree,
+        seeds,
+        specks,
+        closed,
+        anchors,
+        rings,
+        offset_m=offset_m,
+        step=sample_m,
+        tile_m=tile_m,
+        local=local,
+        failures=failures,
     )
     summary.update(network.summary)
     rows.anchors.extend(network.anchor_rows)
@@ -454,12 +484,13 @@ def _body(
     first_cap = len(rows.caps)
     if kept_pieces and parts:
         opened_tree = shapely.STRtree(closed.opened_parts)
+        opened_cells: dict[int, _Local] = {}
         for i in np.flatnonzero(network.kept_closed):
             anchored = bool(len(closed.anchors[i]))
             rows.caps.append(
                 {
                     "body": body,
-                    "kind": _kind(closed.pieces[i], closed.opened_parts, opened_tree),
+                    "kind": _kind(closed.pieces[i], closed.opened_parts, opened_tree, opened_cells),
                     "reach_m": round(float(closed.reach[i]), 3),
                     "anchored": anchored,
                     "kept_by": network.kept_by[i],
@@ -496,8 +527,10 @@ def _body(
     raw_lines: list[LineString] = []
     if parts:
         pieces: list[_Piece] = []
+        # One index of the kept closed-off water's outline serves every ring of the body.
+        kept_edges = _edge_tree(kept_pieces) if kept_pieces else None
         for coords in _with_joins(rings, network.join_xy, network.join_ring, network.join_segment):
-            pieces.extend(_cut(coords, owners, kept_pieces, offset_m=offset_m))
+            pieces.extend(_cut(coords, owners, kept_edges, offset_m=offset_m))
         pieces = _cut_artificial(pieces, dam_tree=dam_tree, extent=extent)
         _pin(pieces, network.join_xy)
         summary["raw_vertices"] = int(sum(len(p.coords) for p in pieces))
@@ -511,8 +544,9 @@ def _body(
                     row["cap_m"] = round(row["cap_m"] + LineString(piece.coords).length, 3)
         validated = [_validated(piece, bank, bank_tree, tolerance_m=tolerance_m, to_page=to_page, from_page=from_page) for piece in pieces]
         raw_lines = [LineString(piece.coords) for piece in pieces]
+        # Crossings and contacts come from one pass; it is repeated only after a piece changed.
+        crossings, contacts = _crossings([line for _, line in validated], raw_lines)
         for _ in range(MAX_REFINE_ROUNDS):
-            crossings = _crossings([line for _, line in validated], raw_lines)
             if not crossings:
                 break
             # Two pieces simplified apart may cross; each gives back the raw vertex its crossing segment dropped farthest.
@@ -532,9 +566,10 @@ def _body(
                 break
             for index in touched:
                 validated[index] = _validated(pieces[index], bank, bank_tree, tolerance_m=tolerance_m, to_page=to_page, from_page=from_page)
-        for _, _, where in _crossings([line for _, line in validated], raw_lines):
+            crossings, contacts = _crossings([line for _, line in validated], raw_lines)
+        for _, _, where in crossings:
             failures.append({"body": body, "kind": "crossing", "detail": "simplified pieces cross where the raw contour does not", "geometry": where})
-        for _, _, where in _crossings([line for _, line in validated], raw_lines, contacts=True):
+        for _, _, where in contacts:
             # Two parts of the offset all but touch: the water there is barely wider than 2d.
             failures.append(
                 {"body": body, "kind": "contact", "detail": f"raw pieces within {CONTACT_M} m cross on the page's grid", "geometry": where}
@@ -554,7 +589,7 @@ def _body(
                 )
             del row["worst"], row["keep"]
             if source_window is not None:
-                held = _held_outside(piece.coords, bank, bank_tree, source_window, extent)
+                held = _held_outside(piece.coords, bank, bank_tree, source_window, extent, offset_m=offset_m)
                 if held is not None:
                     failures.append(
                         {"body": body, "kind": "source edge", "detail": "contour held by a bank outside the source window", "geometry": held}
@@ -567,7 +602,7 @@ def _body(
     centre_rows, nodes = _centre_pieces(
         body,
         network,
-        water,
+        local,
         owners,
         closed,
         dam_tree=dam_tree,
@@ -583,6 +618,8 @@ def _body(
     rows.nodes.extend(nodes)
     summary["centre_pieces"] = len(centre_rows)
     summary["centre_vertices"] = int(sum(shapely.get_num_coordinates(row["geometry"]) for row in centre_rows))
+    # The delivery polygons were prepared for this body only.
+    shapely.destroy_prepared(polygons)
     summary["wall_s"] = time.perf_counter() - started
     return summary
 
@@ -649,6 +686,111 @@ def _generators(points: np.ndarray, bank: _Bank, tree: shapely.STRtree) -> tuple
 
 
 @dataclass
+class _Local:
+    """A body's water cut into square cells with a margin, for predicates on short lines at its bank.
+
+    GEOS answers ``covers`` for a line that touches a polygon's outline by relating the whole
+    polygon: 2.6 ms a line against a 200,000-vertex ring, measured, against 2 µs for a line
+    inside it, and every corner branch ends on the bank. A line within a cell's margin lies in
+    the water exactly when it lies in the water of the cell, whose outline near the line is the
+    body's own, vertex for vertex; so the cell gives the same answer at the cost of its own size.
+    Cells are cut from blocks of cells, so no cut reads the whole body more than once a block.
+    """
+
+    water: BaseGeometry
+    origin: np.ndarray
+    #: Whether the body's outer rings run clockwise, as GEOS writes them; its holes run the other way.
+    exterior_cw: bool
+    #: The prepared cells used last, at most ``LOCAL_CELLS_KEPT``; a sea has more than memory should hold at once.
+    cells: OrderedDict[tuple[int, int], BaseGeometry] = field(default_factory=OrderedDict)
+    blocks: dict[tuple[int, int], BaseGeometry] = field(default_factory=dict)
+
+    def _clipped(self, source: BaseGeometry, left: float, bottom: float, side: float, reach: float) -> BaseGeometry:
+        cut = shapely.intersection(source, shapely.box(left - reach, bottom - reach, left + side + reach, bottom + side + reach))
+        # A cut can leave lines or points where the box grazes the bank; they lie on the box, far from any line asked about.
+        polygons = [g for g in shapely.get_parts(cut) if isinstance(g, Polygon) and not g.is_empty]
+        if not polygons:
+            return Polygon()
+        # Each edge runs the way it runs in the body: GEOS measures a distance from a segment's first
+        # vertex, so the same edge reversed gives a figure a bit apart.
+        return shapely.orient_polygons(shapely.multipolygons(polygons), exterior_cw=self.exterior_cw)
+
+    def cell(self, key: tuple[int, int]) -> BaseGeometry:
+        found = self.cells.get(key)
+        if found is not None:
+            self.cells.move_to_end(key)
+        else:
+            block_key = (key[0] // LOCAL_BLOCK_CELLS, key[1] // LOCAL_BLOCK_CELLS)
+            block = self.blocks.get(block_key)
+            if block is None:
+                side = LOCAL_CELL_M * LOCAL_BLOCK_CELLS
+                corner = self.origin + np.asarray(block_key) * side
+                block = self._clipped(self.water, float(corner[0]), float(corner[1]), side, LOCAL_MARGIN_M + 2.0)
+                self.blocks[block_key] = block
+            corner = self.origin + np.asarray(key) * LOCAL_CELL_M
+            found = self._clipped(block, float(corner[0]), float(corner[1]), LOCAL_CELL_M, LOCAL_MARGIN_M + 1.0)
+            shapely.prepare(found)
+            self.cells[key] = found
+            if len(self.cells) > LOCAL_CELLS_KEPT:
+                self.cells.popitem(last=False)
+        return found
+
+    def _placed(self, lines: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Each line's cell, and whether it lies within that cell's margin."""
+        bounds = shapely.bounds(lines).reshape(-1, 4)
+        key = np.floor((bounds[:, :2] - self.origin) / LOCAL_CELL_M).astype(np.int64)
+        limit = self.origin + (key + 1) * LOCAL_CELL_M + LOCAL_MARGIN_M
+        return key, (bounds[:, 2] <= limit[:, 0]) & (bounds[:, 3] <= limit[:, 1])
+
+    def near(self, geometry: BaseGeometry) -> BaseGeometry:
+        """The water round one geometry: its cell's, or the whole body's where it leaves the cell's margin."""
+        key, fits = self._placed(np.asarray([geometry], dtype=object))
+        return self.cell((int(key[0, 0]), int(key[0, 1]))) if fits[0] else self.water
+
+    def distance(self, points: np.ndarray) -> np.ndarray:
+        """``shapely.distance(points, water)``, each read in its cell where the answer lies within the cell's margin.
+
+        A cell holds the water within its margin exactly, so a distance under the margin found
+        there is the distance to the whole water; a larger one is asked of the whole.
+        """
+        points = np.asarray(points, dtype=object)
+        out = np.full(len(points), np.nan)
+        if not len(points):
+            return out
+        key, fits = self._placed(points)
+        members = np.flatnonzero(fits)
+        cells, which = np.unique(key[members], axis=0, return_inverse=True)
+        for k, cell in enumerate(cells):
+            chosen = members[which.ravel() == k]
+            out[chosen] = shapely.distance(points[chosen], self.cell((int(cell[0]), int(cell[1]))))
+        rest = ~(out < LOCAL_MARGIN_M)
+        if rest.any():
+            out[rest] = shapely.distance(points[rest], self.water)
+        return out
+
+    def covers(self, lines: np.ndarray) -> np.ndarray:
+        """``shapely.covers(water, lines)``, each asked of its cell's water."""
+        lines = np.asarray(lines, dtype=object)
+        out = np.zeros(len(lines), dtype=bool)
+        if not len(lines):
+            return out
+        key, fits = self._placed(lines)
+        if (~fits).any():
+            out[~fits] = shapely.covers(self.water, lines[~fits])
+        members = np.flatnonzero(fits)
+        cells, which = np.unique(key[members], axis=0, return_inverse=True)
+        for k, cell in enumerate(cells):
+            chosen = members[which.ravel() == k]
+            out[chosen] = shapely.covers(self.cell((int(cell[0]), int(cell[1]))), lines[chosen])
+        return out
+
+
+def _local(water: BaseGeometry) -> _Local:
+    first = shapely.get_parts(water)[0]
+    return _Local(water, np.floor(np.asarray(shapely.bounds(water)[:2]) / LOCAL_CELL_M) * LOCAL_CELL_M, not bool(shapely.is_ccw(first.exterior)))
+
+
+@dataclass
 class _Owners:
     polygons: np.ndarray
     owner: np.ndarray
@@ -656,13 +798,19 @@ class _Owners:
 
 
 def _owners(polygons: np.ndarray, owner: np.ndarray) -> _Owners:
+    # Prepared, a point is located in a large delivery polygon through its index rather than by walking every edge.
+    shapely.prepare(polygons)
     return _Owners(polygons, owner, shapely.STRtree(polygons))
 
 
 def _owner_at(points: np.ndarray, owners: _Owners) -> np.ndarray:
     """The height owner of each point; where two delivery polygons overlap the lake, listed first, wins."""
     found = np.full(len(points), -1, dtype=int)
-    point_index, polygon_index = owners.tree.query(shapely.points(points), predicate="intersects")
+    # The tree's own predicate tests a point against an unprepared polygon edge by edge; the same test
+    # against the prepared polygon gives the same answer through its index.
+    point_index, polygon_index = owners.tree.query(shapely.points(points))
+    inside = shapely.intersects_xy(owners.polygons[polygon_index], points[point_index, 0], points[point_index, 1])
+    point_index, polygon_index = point_index[inside], polygon_index[inside]
     candidates = owners.owner[polygon_index]
     order = np.lexsort((np.where(candidates < 0, np.iinfo(int).max, candidates), point_index))
     point_index, candidates = point_index[order], candidates[order]
@@ -700,6 +848,7 @@ def _residue(
     """
     opened_parts: list[BaseGeometry] = [shapely.buffer(part, offset_m, quad_segs=quad_segs) for part in parts]
     opened = shapely.union_all(opened_parts)
+    opened_cells = _local(opened) if shapely.get_num_coordinates(opened) >= LOCAL_MIN_VERTICES else None
     residue: list[BaseGeometry] = [
         p for p in shapely.get_parts(shapely.difference(water, opened)) if isinstance(p, Polygon) and p.area >= RESIDUE_MIN_M2
     ]
@@ -721,22 +870,38 @@ def _residue(
             near = anchors.query(piece, predicate="dwithin", distance=SHORE_SIMPLIFY_M)
             if len(near):
                 points = anchors.geometries[near]
-                own = near[shapely.distance(points, piece) < shapely.distance(points, opened)]
+                to_opened = opened_cells.distance(points) if opened_cells is not None else shapely.distance(points, opened)
+                own = near[shapely.distance(points, piece) < to_opened]
         held.append(own)
     return _Closed(residue, reach, held, opened_parts)
 
 
-def _kind(piece: BaseGeometry, opened_parts: list[BaseGeometry], tree: shapely.STRtree) -> str:
-    """Passage between two parts of the offset, loop meeting one part twice, or terminal."""
-    near = tree.query(piece, predicate="dwithin", distance=0.05)
+def _kind(piece: BaseGeometry, opened_parts: list[BaseGeometry], tree: shapely.STRtree, cells: dict[int, _Local]) -> str:
+    """Passage between two parts of the offset, loop meeting one part twice, or terminal.
+
+    A large part is asked through the cell round the piece (``cells`` keeps them by part): distance
+    and a rectangle clip there read a sea's reachable water in cells, not a million vertices a piece.
+    """
+
+    def around(index: int) -> BaseGeometry:
+        part = opened_parts[index]
+        if shapely.get_num_coordinates(part) < LOCAL_MIN_VERTICES:
+            return part
+        if index not in cells:
+            cells[index] = _local(part)
+        return cells[index].near(piece)
+
+    # The tree's own dwithin: the parts whose envelopes come that near, in the tree's order, then the distance.
+    x0, y0, x1, y1 = shapely.bounds(piece)
+    candidates = tree.query(shapely.box(x0 - 0.05, y0 - 0.05, x1 + 0.05, y1 + 0.05))
+    near = [int(i) for i in candidates if shapely.dwithin(piece, around(int(i)), 0.05)]
     if len(near) >= 2:
         return "passage"
     contact = None
     if len(near):
         # Grow only the reachable water around this piece: growing a whole sea costs minutes per piece,
         # and even overlaying it with a box is slow; a rectangle clip gives the same water near the piece.
-        x0, y0, x1, y1 = shapely.bounds(piece)
-        local = shapely.clip_by_rect(opened_parts[int(near[0])], x0 - 1.0, y0 - 1.0, x1 + 1.0, y1 + 1.0)
+        local = shapely.clip_by_rect(around(near[0]), x0 - 1.0, y0 - 1.0, x1 + 1.0, y1 + 1.0)
         contact = shapely.line_merge(shapely.intersection(piece.boundary, shapely.buffer(local, 0.05)))
     arcs = [a for a in shapely.get_parts(contact) if a.length > 0.1] if contact is not None else []
     return "loop" if len(arcs) >= 2 else "terminal"
@@ -748,17 +913,19 @@ def _edge_tree(polygons: Sequence[BaseGeometry]) -> shapely.STRtree:
     return shapely.STRtree(np.concatenate([_edges(shapely.get_coordinates(r)) for r in rings]))
 
 
-def _cut(coords: np.ndarray, owners: _Owners, residue: list[BaseGeometry], *, offset_m: float) -> list[_Piece]:
+def _cut(coords: np.ndarray, owners: _Owners, residue: shapely.STRtree | None, *, offset_m: float) -> list[_Piece]:
     """Cut one closed raw ring where its height owner or its role changes.
 
     Owner changes fall inside segments and get an exact interface vertex; role
     changes fall on raw vertices, which are dense on the arcs a cap is made of.
+    ``residue`` indexes the edges of the kept closed-off water's outlines.
     """
     coords = _with_interfaces(coords, owners)
     points = shapely.points(coords)
-    if residue:
-        _, distances = _edge_tree(residue).query_nearest(points, return_distance=True, all_matches=False)
-        held = distances <= offset_m + CAP_TOLERANCE_M
+    if residue is not None:
+        # Whether any outline edge lies that near, as the nearest distance compared with it would say.
+        held = np.zeros(len(coords), dtype=bool)
+        held[residue.query(points, predicate="dwithin", distance=offset_m + CAP_TOLERANCE_M)[0]] = True
     else:
         held = np.zeros(len(coords), dtype=bool)
     middles = (coords[:-1] + coords[1:]) / 2
@@ -918,6 +1085,58 @@ def _distance_to_segment(points: np.ndarray, one: np.ndarray, other: np.ndarray)
     return np.asarray(np.hypot(*(points - (one + t[:, None] * delta)).T))
 
 
+def _segment_distance(points: np.ndarray, one: np.ndarray, other: np.ndarray) -> np.ndarray:
+    """Each point's distance from its own segment, GEOS's ``pointToSegment`` written out operation for operation.
+
+    ``STRtree.query_nearest`` computes exactly this for a point and a
+    two-vertex line: the two agreed bit for bit on 200,000 test points, on
+    vertices, on segments and beside repeated vertices (phase 12c-2).
+    """
+    abx, aby = other[:, 0] - one[:, 0], other[:, 1] - one[:, 1]
+    apx, apy = points[:, 0] - one[:, 0], points[:, 1] - one[:, 1]
+    bpx, bpy = points[:, 0] - other[:, 0], points[:, 1] - other[:, 1]
+    squared = abx * abx + aby * aby
+    with np.errstate(divide="ignore", invalid="ignore"):
+        r = (apx * abx + apy * aby) / squared
+        s = ((one[:, 1] - points[:, 1]) * abx - (one[:, 0] - points[:, 0]) * aby) / squared
+    to_one = np.sqrt(apx * apx + apy * apy)
+    to_other = np.sqrt(bpx * bpx + bpy * bpy)
+    same = (one[:, 0] == other[:, 0]) & (one[:, 1] == other[:, 1])
+    return np.asarray(np.where(same | (r <= 0.0), to_one, np.where(r >= 1.0, to_other, np.abs(s) * np.sqrt(squared))))
+
+
+@dataclass
+class _SegmentIndex:
+    """Segments by their envelopes, for the distance of many points from all of them at once."""
+
+    one: np.ndarray
+    other: np.ndarray
+    tree: shapely.STRtree
+
+    @classmethod
+    def of(cls, coords: np.ndarray) -> _SegmentIndex:
+        """The segments of a vertex run."""
+        return cls.between(coords[:-1], coords[1:])
+
+    @classmethod
+    def between(cls, one: np.ndarray, other: np.ndarray) -> _SegmentIndex:
+        low, high = np.minimum(one, other), np.maximum(one, other)
+        return cls(one, other, shapely.STRtree(shapely.box(low[:, 0], low[:, 1], high[:, 0], high[:, 1])))
+
+    def distance(self, points: np.ndarray, hint: np.ndarray) -> np.ndarray:
+        """Each point's distance from the nearest segment, as an STRtree of them as lines returns it with ``query_nearest``.
+
+        ``hint`` names a segment near each point. Its distance bounds the answer,
+        so only segments whose envelopes come within it can be nearer; the least
+        over them is the tree's answer, found without its per-candidate calls.
+        """
+        bound = _segment_distance(points, self.one[hint], self.other[hint])
+        which, segment = self.tree.query(shapely.box(points[:, 0] - bound, points[:, 1] - bound, points[:, 0] + bound, points[:, 1] + bound))
+        out = bound.copy()
+        np.minimum.at(out, which, _segment_distance(points[which], self.one[segment], self.other[segment]))
+        return out
+
+
 def _page_round_trip(crs: Any) -> tuple[Transformer, Transformer]:
     return Transformer.from_crs(crs, "EPSG:4326", always_xy=True), Transformer.from_crs("EPSG:4326", crs, always_xy=True)
 
@@ -945,7 +1164,7 @@ def _validated(
     raw = piece.coords
     raw_line = LineString(raw)
     raw_segments = _edges(raw)
-    raw_tree = shapely.STRtree(raw_segments)
+    raw_index = _SegmentIndex.of(raw)
     (_, _), raw_gaps = bank_tree.query_nearest(raw_segments, return_distance=True, all_matches=False)
     keep = simplify_pinned(raw, tolerance_m)
     initial = len(keep)
@@ -955,10 +1174,11 @@ def _validated(
         coords = decoded(raw[keep], to_page, from_page)
         segments = _edges(coords)
         (_, _), clearance = bank_tree.query_nearest(segments, return_distance=True, all_matches=False)
-        forward, forward_at = _deviation_bound(coords, raw_tree)
-        backward, backward_at = _deviation_bound(raw, shapely.STRtree(segments))
-        # A raw segment's bound belongs to the simplified segment spanning it.
+        # A decoded segment follows the raw segments between its two kept vertices; a raw segment's
+        # bound belongs to the simplified segment spanning it.
         span = np.searchsorted(keep, np.arange(len(raw) - 1), side="right") - 1
+        forward, forward_at = _deviation_bound(coords, raw_index, keep[:-1], keep[1:] - 1)
+        backward, backward_at = _deviation_bound(raw, _SegmentIndex.of(coords), span, span)
         backward_by_segment = np.zeros(len(keep) - 1)
         np.maximum.at(backward_by_segment, span, backward)
         failing = (clearance < CONTOUR_CLEARANCE_M) | (forward > CONTOUR_DEVIATION_M) | (backward_by_segment > CONTOUR_DEVIATION_M)
@@ -1003,12 +1223,16 @@ def _validated(
     return row, decoded_line
 
 
-def _deviation_bound(coords: np.ndarray, tree: shapely.STRtree, gate: np.ndarray | float = CONTOUR_DEVIATION_M) -> tuple[np.ndarray, np.ndarray]:
-    """Per segment of ``coords``: a proven upper bound on its distance from the tree's line, and the largest sample.
+def _deviation_bound(
+    coords: np.ndarray, target: _SegmentIndex, first: np.ndarray, last: np.ndarray, gate: np.ndarray | float = CONTOUR_DEVIATION_M
+) -> tuple[np.ndarray, np.ndarray]:
+    """Per segment of ``coords``: a proven upper bound on its distance from the target line, and the largest sample.
 
     Samples every ``COARSE_SAMPLE_M``; a gap whose bound, the mean of its ends
     plus half its length, exceeds the gate (one figure, or one per segment) is
-    sampled again every ``FINE_SAMPLE_M``.
+    sampled again every ``FINE_SAMPLE_M``. Segment k of ``coords`` runs beside
+    the target's segments ``first[k]`` to ``last[k]``; they only point the
+    search, the distance is to the whole target.
     """
     lengths = np.hypot(*np.diff(coords, axis=0).T)
     bounds = np.zeros(len(lengths))
@@ -1020,9 +1244,13 @@ def _deviation_bound(coords: np.ndarray, tree: shapely.STRtree, gate: np.ndarray
             break
         counts = np.maximum(np.ceil(lengths[todo] / step).astype(int), 1)
         owner = np.repeat(todo, counts + 1)
-        t = np.concatenate([np.linspace(0.0, 1.0, c + 1) for c in counts])
+        # np.linspace(0, 1, c + 1) segment by segment, at once: k times 1/c, the last exactly 1, bit for bit.
+        k = np.arange(int((counts + 1).sum())) - np.repeat(np.cumsum(counts + 1) - (counts + 1), counts + 1)
+        t = k * np.repeat(1.0 / counts, counts + 1)
+        t[np.cumsum(counts + 1) - 1] = 1.0
         points = coords[owner] + t[:, None] * (coords[owner + 1] - coords[owner])
-        (_, _), distance = tree.query_nearest(shapely.points(points), return_distance=True, all_matches=False)
+        hint = np.clip(first[owner] + np.rint(t * (last[owner] - first[owner])).astype(np.int64), 0, len(target.one) - 1)
+        distance = target.distance(points, hint)
         gap = lengths[owner] / np.repeat(counts, counts + 1)
         pair = np.r_[owner[1:] == owner[:-1], False]
         between = np.where(pair, (distance + np.r_[distance[1:], 0.0] + gap) / 2, 0.0)
@@ -1035,32 +1263,45 @@ def _deviation_bound(coords: np.ndarray, tree: shapely.STRtree, gate: np.ndarray
     return bounds, sampled
 
 
-def _held_outside(coords: np.ndarray, bank: _Bank, tree: shapely.STRtree, window: BaseGeometry, extent: BaseGeometry | None) -> Point | None:
-    """The first raw vertex inside the extent whose nearest bank lies outside the source window, if any."""
-    _, _, nearest = _generators(coords, bank, tree)
+def _held_outside(
+    coords: np.ndarray, bank: _Bank, tree: shapely.STRtree, window: BaseGeometry, extent: BaseGeometry | None, *, offset_m: float
+) -> Point | None:
+    """The first raw vertex inside the extent whose nearest bank lies outside the source window, if any.
+
+    A raw contour vertex lies the offset from its nearest bank point (the buffer's own
+    vertices, and points on its chords a centimetre nearer). One deeper than that inside
+    the window has that point inside it too, so only the vertices near the window's edge
+    or beyond it are looked up.
+    """
+    points = np.asarray(shapely.points(coords), dtype=object)
+    deep = shapely.contains_xy(window, coords[:, 0], coords[:, 1]) & (shapely.distance(points, shapely.boundary(window)) > offset_m + 1.0)
+    candidates = np.flatnonzero(~deep)
+    if not len(candidates):
+        return None
+    _, _, nearest = _generators(coords[candidates], bank, tree)
     outside = ~shapely.intersects(window, nearest)
     if extent is not None:
-        outside &= shapely.intersects(extent, shapely.points(coords))
-    hits = np.flatnonzero(outside)
+        outside &= shapely.intersects(extent, points[candidates])
+    hits = candidates[outside]
     return Point(coords[hits[0]]) if len(hits) else None
 
 
 def _crossings(
-    decoded_lines: list[LineString], raw_lines: list[LineString], *, contacts: bool = False, only: np.ndarray | None = None
-) -> list[tuple[int, int, Point]]:
+    decoded_lines: list[LineString], raw_lines: list[LineString], *, only: np.ndarray | None = None
+) -> tuple[list[tuple[int, int, Point]], list[tuple[int, int, Point]]]:
     """Where two simplified pieces meet other than at a shared end or where their raw pieces meet too.
 
     Raw pieces that pass within ``CONTACT_M`` of each other without meeting may
     cross once written on the page's grid, and no vertex can undo that. Those
-    are contacts: returned instead of crossings when ``contacts`` is set. With
+    are contacts, returned apart: crossings first, then contacts. With
     ``only``, just the pairs that involve one of those pieces are looked at.
     """
     if len(decoded_lines) < 2:
-        return []
+        return [], []
     tree = shapely.STRtree(decoded_lines)
     queries = np.arange(len(decoded_lines)) if only is None else np.asarray(only, dtype=int)
     if not len(queries):
-        return []
+        return [], []
     lines = np.asarray(decoded_lines, dtype=object)
     left, right = tree.query(lines[queries], predicate="intersects")
     left = queries[left]
@@ -1068,7 +1309,7 @@ def _crossings(
     # cross: dropping them first is the end test below done at once, and it keeps the loop short.
     apart = (left != right) & ~shapely.touches(lines[left], lines[right])
     pairs = sorted({(min(a, b), max(a, b)) for a, b in zip(left[apart].tolist(), right[apart].tolist(), strict=True)})
-    found = []
+    found: tuple[list[tuple[int, int, Point]], list[tuple[int, int, Point]]] = ([], [])
     for one, other in pairs:
         meet = shapely.intersection(decoded_lines[one], decoded_lines[other])
         ends = shapely.union(decoded_lines[one].boundary, decoded_lines[other].boundary)
@@ -1082,8 +1323,7 @@ def _crossings(
                 continue
             around = shapely.buffer(point, CONTOUR_DEVIATION_M)
             touching = shapely.distance(shapely.intersection(raw_lines[one], around), shapely.intersection(raw_lines[other], around)) <= CONTACT_M
-            if touching == contacts:
-                found.append((one, other, shapely.centroid(point)))
+            found[1 if touching else 0].append((one, other, shapely.centroid(point)))
     return found
 
 
@@ -1234,6 +1474,121 @@ class _Medial:
     made: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=bool))
     #: Nodes where an edge was cut at the water's edge: the samples there are too far apart for the water.
     bank_end: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=bool))
+    #: The middles of the witness edges a tile's neighbour computed otherwise than the tile that owns them.
+    seams: np.ndarray = field(default_factory=lambda: np.empty((0, 2)))
+
+
+@dataclass
+class _Layout:
+    """Where the medial construction looks for a given set of seeds and a coarsest step.
+
+    Attributes:
+        seed_tree: The seeds, prepared
+        keep_region: Within 2d of a seed: an edge whose middle lies here is kept
+        tiles: Per tile that meets the keep region and has a seed near: its
+            column, row, the region its samples are taken from, the sorted bank
+            segments that region reads and the seeds near it, by identity
+    """
+
+    seed_tree: shapely.STRtree
+    keep_region: BaseGeometry
+    tiles: list[tuple[int, int, BaseGeometry, np.ndarray, frozenset[int]]]
+
+
+@dataclass
+class _TileCache:
+    """What one body's medial construction keeps between its halving rounds and window growths.
+
+    ``tiles`` holds each tile's edges with the segments, steps and nearby
+    seeds they came from. A halving round reuses a tile whose own segments and
+    steps did not change. A growth adds seeds and recomputes every tile; a tile
+    no added seed comes near, with the same segments and steps, would come out
+    the same, so it is kept instead (see ``_medial_tiles``). ``layouts``,
+    ``grown``, ``buffers`` and ``regions`` keep what a layout is made of, so a
+    growth met again in a later round, or a tile whose seeds did not change,
+    is not built again.
+    """
+
+    tiles: dict[tuple[int, int], tuple[np.ndarray, np.ndarray, frozenset[int], dict[str, Any]]] = field(default_factory=dict)
+    layouts: list[tuple[list[BaseGeometry], float, _Layout]] = field(default_factory=list)
+    grown: dict[bytes, BaseGeometry] = field(default_factory=dict)
+    buffers: dict[tuple[int, float], tuple[BaseGeometry, BaseGeometry]] = field(default_factory=dict)
+    regions: dict[tuple[int, int, float], tuple[frozenset[int], BaseGeometry, np.ndarray]] = field(default_factory=dict)
+
+    def layout(self, seeds: list[BaseGeometry], step: float) -> _Layout | None:
+        for index, (known, known_step, layout) in enumerate(self.layouts):
+            if known_step == step and len(known) == len(seeds) and all(a is b for a, b in zip(known, seeds, strict=True)):
+                self.layouts.append(self.layouts.pop(index))
+                return layout
+        return None
+
+    def keep(self, seeds: list[BaseGeometry], step: float, layout: _Layout) -> None:
+        """Keep a layout, and only the few used last: each holds its keep region prepared, a sea's in hundreds of megabytes."""
+        self.layouts.append((list(seeds), step, layout))
+        while len(self.layouts) > LAYOUTS_KEPT:
+            shapely.destroy_prepared(self.layouts.pop(0)[2].keep_region)
+
+    def grow(self, points: np.ndarray, offset_m: float) -> list[BaseGeometry]:
+        """The disc round each point, the same object whenever the same point is grown again."""
+        out = []
+        for point in np.asarray(points, dtype=np.float64):
+            key = point.tobytes()
+            if key not in self.grown:
+                self.grown[key] = shapely.buffer(shapely.Point(point), offset_m)
+            out.append(self.grown[key])
+        return out
+
+
+def _layout(
+    bank_tree: shapely.STRtree, seeds: list[BaseGeometry], origin: np.ndarray, *, offset_m: float, step: float, tile_m: float, cache: _TileCache
+) -> _Layout:
+    """The tiles the seeds call for, each with the region its samples come from and the bank segments that region reads.
+
+    A seed's two buffers, and a tile's region when the seeds near it are the
+    same ones, are taken from ``cache``: they are the same computation.
+    """
+    d = offset_m
+    seed_array = np.asarray(seeds, dtype=object)
+    # Prepared, a node is placed in a large closed-off piece through its index (see ``_graph``).
+    shapely.prepare(seed_array[shapely.get_num_coordinates(seed_array) >= PREPARED_SEED_VERTICES])
+    seed_tree = shapely.STRtree(seed_array)
+    missing = [i for i, seed in enumerate(seeds) if (id(seed), step) not in cache.buffers]
+    if missing:
+        fresh = seed_array[missing]
+        for i, keep, reach in zip(missing, shapely.buffer(fresh, 2 * d), shapely.buffer(fresh, 3 * d + 3 * step + 1.0), strict=True):
+            cache.buffers[(id(seeds[i]), step)] = (keep, reach)
+    buffers = [cache.buffers[(id(seed), step)] for seed in seeds]
+    keep_region = shapely.union_all(np.asarray([keep for keep, _ in buffers], dtype=object))
+    seed_reach = np.asarray([reach for _, reach in buffers], dtype=object)
+    shapely.prepare(keep_region)
+    sample_reach = 3 * d + 3 * step + 1.0
+    tile_margin = 2 * d + TILE_BAND_M + 3 * step + 2.0
+    x0, y0, x1, y1 = shapely.bounds(keep_region)
+    columns = range(int(np.floor((x0 - origin[0]) / tile_m)), int(np.floor((x1 - origin[0]) / tile_m)) + 1)
+    rows_range = range(int(np.floor((y0 - origin[1]) / tile_m)), int(np.floor((y1 - origin[1]) / tile_m)) + 1)
+    tiles: list[tuple[int, int, BaseGeometry, np.ndarray, frozenset[int]]] = []
+    for column in columns:
+        for row in rows_range:
+            left, bottom = origin[0] + column * tile_m, origin[1] + row * tile_m
+            cell = shapely.box(left, bottom, left + tile_m, bottom + tile_m)
+            if not keep_region.intersects(cell):
+                continue
+            window = shapely.buffer(cell, tile_margin, join_style="mitre")
+            near = seed_tree.query(window, predicate="dwithin", distance=sample_reach)
+            if not len(near):
+                continue
+            near_ids = frozenset(id(seeds[i]) for i in near)
+            known = cache.regions.get((column, row, step))
+            if known is not None and known[0] == near_ids:
+                region, segments = known[1], known[2]
+            else:
+                # A rectangle clip first: a river's buffered seed runs for kilometres past the tile.
+                region = shapely.intersection(window, shapely.union_all(shapely.clip_by_rect(seed_reach[near], *shapely.bounds(window))))
+                # Kept unprepared: a sea's tiles would hold every region's index between rounds.
+                segments = np.sort(bank_tree.query(region))
+                cache.regions[(column, row, step)] = (near_ids, region, segments)
+            tiles.append((column, row, region, segments, near_ids))
+    return _Layout(seed_tree, keep_region, tiles)
 
 
 def _medial(
@@ -1245,14 +1600,16 @@ def _medial(
     offset_m: float,
     steps: np.ndarray,
     tile_m: float,
-    cache: dict[tuple[int, int], tuple[np.ndarray, np.ndarray, dict[str, Any]]],
+    cache: _TileCache,
+    local: _Local,
     feet: tuple[np.ndarray, np.ndarray] = (np.empty(0, dtype=int), np.empty((0, 2))),
 ) -> _Medial:
     """The medial graph of every component that meets a seed, grown until no kept branch leaves its window.
 
     ``cache`` keeps each tile's edges with the segments and steps they came
     from; a later call with finer steps elsewhere reuses a tile whose own
-    segments and steps did not change. Growing the windows clears it. ``feet``
+    segments and steps did not change. Growing the windows recomputes the
+    tiles, all but those the growth leaves as they were. ``feet``
     are the bank points of the access anchors in closed-off water, by segment:
     a component their samples face is kept too, since at a shallow corner the
     sampled branch starts a few steps from the bank and can miss a small piece.
@@ -1261,8 +1618,6 @@ def _medial(
     sampler = _sampler(bank, steps, origin)
     grown: list[BaseGeometry] = []
     for rounds in range(MAX_GROWTH_ROUNDS + 1):
-        if rounds:
-            cache.clear()
         medial, outside = _medial_tiles(
             water,
             bank_tree,
@@ -1271,13 +1626,15 @@ def _medial(
             offset_m=offset_m,
             tile_m=tile_m,
             cache=cache,
+            local=local,
             faced=_nearest_samples(sampler, bank, *feet),
+            growing=rounds > 0,
         )
         medial.diagnostics["growth_rounds"] = rounds
         medial.diagnostics["window_open"] = len(outside)
         if not len(outside):
             return medial
-        grown.extend(np.asarray(shapely.buffer(shapely.points(outside), offset_m), dtype=object))
+        grown.extend(cache.grow(outside, offset_m))
     return medial
 
 
@@ -1289,8 +1646,10 @@ def _medial_tiles(
     *,
     offset_m: float,
     tile_m: float,
-    cache: dict[tuple[int, int], tuple[np.ndarray, np.ndarray, dict[str, Any]]],
+    cache: _TileCache,
+    local: _Local,
     faced: np.ndarray,
+    growing: bool = False,
 ) -> tuple[_Medial, np.ndarray]:
     """One pass over the tiles; returns the graph and where a kept component runs out of its window.
 
@@ -1299,18 +1658,19 @@ def _medial_tiles(
     cell, and within ``3d`` of the seeds; it keeps the edges whose middle it
     contains and lies within ``2d`` of a seed. It also recomputes the edges just
     across its border; they must equal those the neighbour keeps.
+
+    A pass that grows the windows stands for recomputing every tile (phase 12c
+    cleared the cache for it). A tile no added seed comes near reads the same
+    samples, the same region and the same keep region round its cell, so its
+    cached edges are what recomputing would give: it keeps them. Afterwards the
+    cache holds exactly this pass's tiles, as the cleared one did.
     """
     step, origin, d = sampler.step, sampler.origin, offset_m
-    seed_array = np.asarray(seeds, dtype=object)
-    seed_tree = shapely.STRtree(seed_array)
-    keep_region = shapely.union_all(shapely.buffer(seed_array, 2 * d))
-    seed_reach = shapely.buffer(seed_array, 3 * d + 3 * step + 1.0)
-    shapely.prepare(keep_region)
-    sample_reach = 3 * d + 3 * step + 1.0
-    tile_margin = 2 * d + TILE_BAND_M + 3 * step + 2.0
-    x0, y0, x1, y1 = shapely.bounds(keep_region)
-    columns = range(int(np.floor((x0 - origin[0]) / tile_m)), int(np.floor((x1 - origin[0]) / tile_m)) + 1)
-    rows_range = range(int(np.floor((y0 - origin[1]) / tile_m)), int(np.floor((y1 - origin[1]) / tile_m)) + 1)
+    layout = cache.layout(seeds, step)
+    if layout is None:
+        layout = _layout(bank_tree, seeds, origin, offset_m=d, step=step, tile_m=tile_m, cache=cache)
+        cache.keep(seeds, step, layout)
+    seed_tree, keep_region = layout.seed_tree, layout.keep_region
     owned: list[dict[str, np.ndarray]] = []
     band: list[dict[str, np.ndarray]] = []
     outer: list[dict[str, np.ndarray]] = []
@@ -1324,50 +1684,41 @@ def _medial_tiles(
         "outside_water_edges": 0,
         "not_empty_edges": 0,
     }
-    for column in columns:
-        for row in rows_range:
-            left, bottom = origin[0] + column * tile_m, origin[1] + row * tile_m
-            cell = shapely.box(left, bottom, left + tile_m, bottom + tile_m)
-            if not keep_region.intersects(cell):
-                continue
-            window = shapely.buffer(cell, tile_margin, join_style="mitre")
-            near = seed_tree.query(window, predicate="dwithin", distance=sample_reach)
-            if not len(near):
-                continue
-            # A rectangle clip first: a river's buffered seed runs for kilometres past the tile.
-            region = shapely.intersection(window, shapely.union_all(shapely.clip_by_rect(seed_reach[near], *shapely.bounds(window))))
+    visited: dict[tuple[int, int], tuple[np.ndarray, np.ndarray, frozenset[int], dict[str, Any]]] = {}
+    for column, row, region, segments, near_ids in layout.tiles:
+        left, bottom = origin[0] + column * tile_m, origin[1] + row * tile_m
+        cached = cache.tiles.get((column, row))
+        if (
+            cached is not None
+            and np.array_equal(cached[0], segments)
+            and np.array_equal(cached[1], sampler.steps[segments])
+            and (not growing or cached[2] == near_ids)
+        ):
+            found = dict(cached[3])
+            visited[(column, row)] = cached
+            diagnostics["tiles_reused"] = diagnostics.get("tiles_reused", 0) + 1
+        else:
             shapely.prepare(region)
-            segments = np.sort(bank_tree.query(region))
-            cached = cache.get((column, row))
-            if cached is not None and np.array_equal(cached[0], segments) and np.array_equal(cached[1], sampler.steps[segments]):
-                found = dict(cached[2])
-                diagnostics["tiles_reused"] = diagnostics.get("tiles_reused", 0) + 1
-            else:
-                computed = _tile_samples(water, bank_tree, sampler, segments, region, keep_region, (left, bottom), tile_m=tile_m, offset_m=d)
-                if computed is None:
-                    continue
-                found = computed
-                cache[(column, row)] = (segments, sampler.steps[segments].copy(), dict(found))
-            diagnostics["tiles"] += 1
-            for key in ("samples", "triangles", "voronoi_edges", "outside_water_edges", "not_empty_edges"):
-                diagnostics[key] += found.pop(key)
-            owned.append(found["owned"])
-            band.append(found["band"])
-            outer.append(found["outer"])
+            computed = _tile_samples(local, bank_tree, sampler, segments, region, keep_region, (left, bottom), tile_m=tile_m, offset_m=d)
+            shapely.destroy_prepared(region)
+            if computed is None:
+                continue
+            found = computed
+            cache.tiles[(column, row)] = visited[(column, row)] = (segments, sampler.steps[segments].copy(), near_ids, dict(found))
+        diagnostics["tiles"] += 1
+        for key in ("samples", "triangles", "voronoi_edges", "outside_water_edges", "not_empty_edges"):
+            diagnostics[key] += found.pop(key)
+        owned.append(found["owned"])
+        band.append(found["band"])
+        outer.append(found["outer"])
+    if growing:
+        cache.tiles = visited
     edges = _stack(owned)
-    medial, keys = _graph(sampler, edges, seed_tree, water, faced)
+    medial, keys = _graph(sampler, edges, seed_tree, local, faced)
     # The witness: an edge computed across a border must be the one its owner kept.
-    witness = _stack(band)
-    kept_keys = set(zip(*_edge_keys(edges), strict=True))
-    by_samples = {(lo, hi): (one, other) for lo, hi, one, other in zip(*_edge_keys(edges), strict=True)}
-    compared = [key for key in zip(*_edge_keys(witness), strict=True) if key[2] != key[3]]
-    diagnostics["overlap_edges"] = len(compared)
-    mismatched = [key for key in compared if key not in kept_keys]
-    diagnostics["overlap_mismatches"] = len(mismatched)
-    # A mismatch between the same two samples is a clip point computed from a differently ended edge.
-    apart = [max(abs(key[2] - by_samples[key[:2]][0]), abs(key[3] - by_samples[key[:2]][1])) / 1e6 for key in mismatched if key[:2] in by_samples]
-    diagnostics["overlap_missing"] = len(mismatched) - len(apart)
-    diagnostics["overlap_largest_difference_m"] = float(max(apart)) if apart else 0.0
+    figures, medial.seams = _overlap(edges, _stack(band))
+    medial.seams = medial.seams + origin
+    diagnostics.update(figures)
     medial.diagnostics.update(diagnostics)
     # Where a kept component meets an edge outside the windows, the windows were too small.
     far = _stack(outer)
@@ -1382,7 +1733,7 @@ def _medial_tiles(
 
 
 def _tile_samples(
-    water: BaseGeometry,
+    local: _Local,
     bank_tree: shapely.STRtree,
     sampler: _Sampler,
     segments: np.ndarray,
@@ -1405,13 +1756,13 @@ def _tile_samples(
     ids, points = ids[unique], points[unique]
     if len(ids) < 4:
         return None
-    found = _tile_edges(water, bank_tree, sampler, ids, points, keep_region, corner, tile_m=tile_m, offset_m=offset_m)
+    found = _tile_edges(local, bank_tree, sampler, ids, points, keep_region, corner, tile_m=tile_m, offset_m=offset_m)
     found["samples"] = len(ids)
     return found
 
 
 def _tile_edges(
-    water: BaseGeometry,
+    local: _Local,
     bank_tree: shapely.STRtree,
     sampler: _Sampler,
     ids: np.ndarray,
@@ -1424,6 +1775,7 @@ def _tile_edges(
 ) -> dict[str, Any]:
     """The Voronoi edges of one tile's samples that lie in the water between non-neighbouring samples, clipped to radius d."""
     origin = sampler.origin
+    water = local.water
     triangles = shapely.get_parts(shapely.delaunay_triangles(shapely.multipoints(points)))
     corners = shapely.get_coordinates(triangles).reshape(-1, 4, 2)[:, :3]
     # Map each triangle corner back to its sample; GEOS keeps the input coordinates.
@@ -1522,6 +1874,8 @@ def _tile_edges(
     wet = wet0 & wet1
     for index in np.flatnonzero(wet0 != wet1):
         inside, outside = (q0[index], q1[index]) if wet0[index] else (q1[index], q0[index])
+        # The whole water, not the cell's: cut in a cell, the far end moved by a nanometre once in the
+        # Lomsdal-Visten sea (phase 12c-2), and the few thousand cuts a sea makes cost seconds.
         part = shapely.intersection(LineString([inside + origin, outside + origin]), water)
         piece = next((g for g in shapely.get_parts(part) if isinstance(g, LineString) and g.distance(Point(inside + origin)) < 1e-9), None)
         if piece is None:
@@ -1580,6 +1934,60 @@ def _tile_edges(
     return out
 
 
+def _overlap(edges: dict[str, np.ndarray], witness: dict[str, np.ndarray]) -> tuple[dict[str, Any], np.ndarray]:
+    """The overlap witness: each edge a tile computed just across its border against the edges the tiles own.
+
+    Returns its figures and the middle of every witness edge that could part the network at the
+    border: one between two samples its owner joins by no edge at all, or one whose owned
+    counterpart ends at another node where the witness's end is a node the middle runs on
+    through. An end at radius d or at the bank is a leaf; a clip computed a millimetre apart there
+    parts nothing.
+
+    Keys are compared as rows of numbers rather than Python tuples, which a sea's millions of
+    edges would hold in gigabytes; ``+ 0.0`` makes a rounded -0 the 0 a tuple compares equal to.
+    """
+
+    def rows(*columns: np.ndarray) -> np.ndarray:
+        table = np.ascontiguousarray(np.column_stack([np.asarray(c, dtype=np.float64) + 0.0 for c in columns]))
+        return table.view(np.dtype((np.void, table.dtype.itemsize * table.shape[1]))).ravel()
+
+    lo, hi, one, other = _edge_keys(edges)
+    w_lo, w_hi, w_one, w_other = _edge_keys(witness)
+    # Which of the witness's ends, in the order its key puts them, is a leaf: cut at radius d or at the bank.
+    first_key, second_key = _node_keys(witness["q0"]), _node_keys(witness["q1"])
+    swap = (first_key.real > second_key.real) | ((first_key.real == second_key.real) & (first_key.imag > second_key.imag))
+    leaf0, leaf1 = witness["rim0"] | witness["bank0"], witness["rim1"] | witness["bank1"]
+    leaf_one, leaf_other = np.where(swap, leaf1, leaf0), np.where(swap, leaf0, leaf1)
+    compared = w_one != w_other
+    w_lo, w_hi, w_one, w_other = w_lo[compared], w_hi[compared], w_one[compared], w_other[compared]
+    mismatched = ~np.isin(
+        rows(w_lo, w_hi, w_one.real, w_one.imag, w_other.real, w_other.imag), rows(lo, hi, one.real, one.imag, other.real, other.imag)
+    )
+    # A mismatch between the same two samples is a clip point computed from a differently ended edge; the
+    # owned edge between them that counts is the last one stacked.
+    pairs = rows(lo, hi)[::-1]
+    known, first = np.unique(pairs, return_index=True)
+    asked = rows(w_lo[mismatched], w_hi[mismatched])
+    place = np.minimum(np.searchsorted(known, asked), max(len(known) - 1, 0))
+    found = (known[place] == asked) if len(known) else np.zeros(len(asked), dtype=bool)
+    owned = len(lo) - 1 - first[place[found]]
+    first_gap, second_gap = w_one[mismatched][found] - one[owned], w_other[mismatched][found] - other[owned]
+    # C's hypot, as Python's abs of a complex number takes it.
+    apart = np.maximum(np.hypot(first_gap.real, first_gap.imag), np.hypot(second_gap.real, second_gap.imag)) / 1e6
+    figures = {
+        "overlap_edges": int(compared.sum()),
+        "overlap_mismatches": int(mismatched.sum()),
+        "overlap_missing": int(mismatched.sum() - found.sum()),
+        "overlap_largest_difference_m": float(apart.max()) if len(apart) else 0.0,
+    }
+    parting = ~found.copy()
+    parting[np.flatnonzero(found)] = ((first_gap != 0) & ~leaf_one[compared][mismatched][found]) | (
+        (second_gap != 0) & ~leaf_other[compared][mismatched][found]
+    )
+    middles = (witness["q0"][compared][mismatched] + witness["q1"][compared][mismatched]) / 2
+    return figures, middles[parting]
+
+
 def _stack(parts: list[dict[str, np.ndarray]]) -> dict[str, np.ndarray]:
     names = ("q0", "q1", "lo", "hi", "g0", "g1", "rim0", "rim1", "bank0", "bank1")
     if not parts:
@@ -1605,7 +2013,7 @@ def _graph(
     sampler: _Sampler,
     edges: dict[str, np.ndarray],
     seed_tree: shapely.STRtree,
-    water: BaseGeometry,
+    local: _Local,
     faced: np.ndarray,
 ) -> tuple[_Medial, np.ndarray]:
     """Nodes shared by coordinates, the components that meet a seed or an anchor's samples, and the node keys of those components."""
@@ -1626,10 +2034,14 @@ def _graph(
     chosen = np.flatnonzero(distinct)[single]
     u, v, a, b = u[chosen], v[chosen], edges["lo"][chosen], edges["hi"][chosen]
     found = len(xy)
-    xy, gens, rim, unique, u, v, a, b = _corners(sampler, water, xy, gens, rim, unique, u, v, a, b)
+    xy, gens, rim, unique, u, v, a, b = _corners(sampler, local, xy, gens, rim, unique, u, v, a, b)
     bank_end = np.concatenate([bank_end, np.zeros(len(xy) - found, dtype=bool)])
     component = _label(len(unique), u, v)
-    touched = np.unique(seed_tree.query(shapely.points(xy), predicate="intersects")[0]) if len(xy) else np.empty(0, dtype=int)
+    touched = np.empty(0, dtype=int)
+    if len(xy):
+        # The tree's own predicate would test each node against an unprepared seed edge by edge.
+        node, seed = seed_tree.query(shapely.points(xy))
+        touched = np.unique(node[shapely.intersects_xy(seed_tree.geometries[seed], xy[node, 0], xy[node, 1])])
     anchored = np.isin(a, faced) | np.isin(b, faced)
     selected = np.isin(component, np.concatenate([component[touched], component[u[anchored]]]))
     renumber = np.cumsum(selected) - 1
@@ -1658,7 +2070,7 @@ def _graph(
 
 def _corners(
     sampler: _Sampler,
-    water: BaseGeometry,
+    local: _Local,
     xy: np.ndarray,
     gens: np.ndarray,
     rim: np.ndarray,
@@ -1694,7 +2106,7 @@ def _corners(
     leaf, vertex, others = leaf[found], vertex[found], others[found]
     corner = sampler.local(vertex) + sampler.origin
     # Only a convex corner: the way on to it lies in the water.
-    convex = shapely.covers(water, shapely.linestrings(np.stack([xy[leaf], corner], axis=1)))
+    convex = local.covers(np.asarray(shapely.linestrings(np.stack([xy[leaf], corner], axis=1)), dtype=object))
     leaf, vertex, others, corner = leaf[convex], vertex[convex], others[convex], corner[convex]
     added = np.arange(len(xy), len(xy) + len(leaf))
     return (
@@ -1784,65 +2196,79 @@ def _retain(medial: _Medial, anchors: list[tuple[np.ndarray, np.ndarray, Point]]
         start = int(np.flatnonzero(component == c)[0])
         far = _farthest(start, pointer, neighbour, via, length)[0]
         protected[[far, _farthest(far, pointer, neighbour, via, length)[0]]] = True
-    degree = np.diff(pointer).copy()
-    parent = np.full(count, -1)
-    parent_edge = np.full(count, -1)
-    peeled = np.zeros(count, dtype=bool)
+    # The walks below run in Python over plain lists: a numpy scalar read per step costs several times
+    # a list's, and the arithmetic is the same double arithmetic either way.
+    pointer_list, neighbour_list, via_list, length_list = pointer.tolist(), neighbour.tolist(), via.tolist(), length.tolist()
+    protected_list = protected.tolist()
+    degree_list = np.diff(pointer).tolist()
+    parent_list = [-1] * count
+    parent_edge_list = [-1] * count
+    peeled_list = [False] * count
     order: list[int] = []
-    stack = [int(i) for i in np.flatnonzero((degree == 1) & ~protected)]
+    stack = [int(i) for i in np.flatnonzero((np.diff(pointer) == 1) & ~protected)]
     for _ in range(2 * count + 1):
         if not stack:
             break
-        x = int(stack.pop())
-        if peeled[x]:
+        x = stack.pop()
+        if peeled_list[x]:
             continue
-        peeled[x] = True
+        peeled_list[x] = True
         order.append(x)
-        for k in range(pointer[x], pointer[x + 1]):
-            y = neighbour[k]
-            if peeled[y]:
+        for k in range(pointer_list[x], pointer_list[x + 1]):
+            y = neighbour_list[k]
+            if peeled_list[y]:
                 continue
-            parent[x], parent_edge[x] = y, via[k]
-            degree[y] -= 1
-            if degree[y] == 1 and not protected[y]:
-                stack.append(int(y))
+            parent_list[x], parent_edge_list[x] = y, via_list[k]
+            degree_list[y] -= 1
+            if degree_list[y] == 1 and not protected_list[y]:
+                stack.append(y)
             break
     else:
         raise RuntimeError("peeling did not finish within its bound")
+    parent = np.asarray(parent_list, dtype=int)
+    parent_edge = np.asarray(parent_edge_list, dtype=int)
+    peeled = np.asarray(peeled_list, dtype=bool)
     kept = np.zeros(len(u), dtype=bool)
     category = np.full(len(u), "", dtype=object)
     core_edge = ~peeled[u] & ~peeled[v]
     kept[core_edge] = True
     core_kind = np.where(joined >= 2, PASSAGE, np.where(joined == 1, LOOP, VANISHED if vanished else ISOLATED))
     category[core_edge] = core_kind[component[u[core_edge]]]
-    height = np.zeros(count)
-    best = np.full(count, -1)
-    total = np.zeros(count)
+    height_list = [0.0] * count
+    best_list = [-1] * count
+    total_list = [0.0] * count
     children: dict[int, list[int]] = {}
     for x in order:
-        p = parent[x]
+        p = parent_list[x]
         if p < 0:
             continue
-        children.setdefault(int(p), []).append(x)
-        reach = height[x] + length[parent_edge[x]]
-        total[p] += total[x] + length[parent_edge[x]]
-        if reach > height[p]:
-            height[p], best[p] = reach, x
-    pending = [x for x in order if parent[x] >= 0 and not peeled[parent[x]]]
+        children.setdefault(p, []).append(x)
+        reach = height_list[x] + length_list[parent_edge_list[x]]
+        total_list[p] += total_list[x] + length_list[parent_edge_list[x]]
+        if reach > height_list[p]:
+            height_list[p], best_list[p] = reach, x
+    height = np.asarray(height_list)
+    best = np.asarray(best_list, dtype=int)
+    total = np.asarray(total_list)
+    kept_list = kept.tolist()
+    category_list = category.tolist()
+    pending = [x for x in order if parent_list[x] >= 0 and not peeled_list[parent_list[x]]]
     for _ in range(count + 1):
         if not pending:
             break
-        x = int(pending.pop())
-        if height[x] + length[parent_edge[x]] < bay_m:
+        x = pending.pop()
+        if height_list[x] + length_list[parent_edge_list[x]] < bay_m:
             continue
         node = x
         for _ in range(count + 1):
-            kept[parent_edge[node]] = True
-            category[parent_edge[node]] = BAY
-            pending.extend(y for y in children.get(int(node), []) if y != best[node])
-            if best[node] < 0:
+            kept_list[parent_edge_list[node]] = True
+            category_list[parent_edge_list[node]] = BAY
+            pending.extend(y for y in children.get(node, []) if y != best_list[node])
+            if best_list[node] < 0:
                 break
-            node = int(best[node])
+            node = best_list[node]
+    kept = np.asarray(kept_list, dtype=bool)
+    category = np.asarray(category_list, dtype=object)
     chosen = np.full(len(anchors), -1)
     kept_ids = np.flatnonzero(kept)
     kept_lines = np.asarray(shapely.linestrings(np.stack([medial.xy[u[kept_ids]], medial.xy[v[kept_ids]]], axis=1)), dtype=object)
@@ -2070,6 +2496,7 @@ def _network(
     offset_m: float,
     step: float,
     tile_m: float,
+    local: _Local,
     failures: list[dict[str, Any]],
 ) -> _Network:
     """Build, prune and measure the centre network of one body, halving the sampling step where the middle gate fails.
@@ -2079,16 +2506,20 @@ def _network(
     that read them are triangulated again.
     """
     vanished = not rings
+    # The raw contour's segments, the same in every halving round.
+    ring_tree = shapely.STRtree(np.concatenate([_edges(coords) for coords in rings])) if rings else None
     feet = _anchor_feet(bank, bank_tree, closed, anchors)
     # An anchor's own corner may cast a branch that no closed-off piece touches: seed it too.
     seeds = [*seeds, *np.asarray(shapely.buffer(shapely.points(feet[1]), 1.0), dtype=object)] if len(feet[1]) else seeds
     level = np.zeros(len(bank.lines), dtype=int)
-    cache: dict[tuple[int, int], tuple[np.ndarray, np.ndarray, dict[str, Any]]] = {}
+    cache = _TileCache()
     halvings = 0
     for halvings in range(CENTRE_HALVINGS + 1):
-        medial = _medial(water, bank, bank_tree, seeds, offset_m=offset_m, steps=step / 2.0**level, tile_m=tile_m, cache=cache, feet=feet)
-        false_joins = _false_joins(medial, rings, specks)
-        pinches = _tie_pinches(medial, water)
+        medial = _medial(
+            water, bank, bank_tree, seeds, offset_m=offset_m, steps=step / 2.0**level, tile_m=tile_m, cache=cache, local=local, feet=feet
+        )
+        false_joins = _false_joins(medial, ring_tree, specks)
+        pinches = _tie_pinches(medial, local)
         candidates, anchor_rows = _anchor_edges(body, medial, bank, bank_tree, closed, anchors)
         kept = _retain(medial, candidates, vanished=vanished)
         anchor_node = kept.anchor_node
@@ -2124,8 +2555,23 @@ def _network(
         )
     if medial.diagnostics["window_open"]:
         failures.append({"body": body, "kind": "window", "detail": "a kept component still runs out of its window", "geometry": Point(medial.xy[0])})
+    if len(medial.seams) and kept.edge.any():
+        # Two tiles that triangulate a border differently (near-cocircular samples leave GEOS's Delaunay to the
+        # rest of each tile's samples) can end their edges at different nodes and cut a kept line there.
+        kept_ids = np.flatnonzero(kept.edge)
+        kept_lines = np.asarray(shapely.linestrings(np.stack([medial.xy[medial.u[kept_ids]], medial.xy[medial.v[kept_ids]]], axis=1)), dtype=object)
+        near = np.unique(shapely.STRtree(kept_lines).query(shapely.points(medial.seams), predicate="dwithin", distance=TILE_BAND_M)[0])
+        for where in near:
+            failures.append(
+                {
+                    "body": body,
+                    "kind": "seam",
+                    "detail": "two tiles disagree about the middle beside a kept line",
+                    "geometry": Point(medial.seams[where]),
+                }
+            )
     join_node = np.flatnonzero(medial.rim & on_kept)
-    join_xy, join_ring, join_segment, gap = _snap_joins(body, medial.xy[join_node], rings, failures)
+    join_xy, join_ring, join_segment, gap = _snap_joins(body, medial.xy[join_node], rings, ring_tree, failures)
     close = gap <= JOIN_SNAP_M
     medial.xy[join_node[close]] = join_xy[close]
     far = np.flatnonzero(~close)
@@ -2220,7 +2666,7 @@ def _network(
     )
 
 
-def _false_joins(medial: _Medial, rings: list[np.ndarray], specks: list[Polygon]) -> int:
+def _false_joins(medial: _Medial, ring_tree: shapely.STRtree | None, specks: list[Polygon]) -> int:
     """Clear the join mark from ends no contour holds, and tie each through or across the gap it was cut at.
 
     The clip at radius d is where the middle meets the contour. Beside a speck
@@ -2234,9 +2680,8 @@ def _false_joins(medial: _Medial, rings: list[np.ndarray], specks: list[Polygon]
     ends = np.flatnonzero(medial.rim)
     if not len(ends):
         return 0
-    if rings:
-        lines = np.concatenate([_edges(coords) for coords in rings])
-        _, gap = shapely.STRtree(lines).query_nearest(shapely.points(medial.xy[ends]), return_distance=True, all_matches=False)
+    if ring_tree is not None:
+        _, gap = ring_tree.query_nearest(shapely.points(medial.xy[ends]), return_distance=True, all_matches=False)
     else:
         gap = np.full(len(ends), np.inf)
     false = ends[gap > TRANSITION_M]
@@ -2281,7 +2726,7 @@ def _false_joins(medial: _Medial, rings: list[np.ndarray], specks: list[Polygon]
     return int(len(false))
 
 
-def _tie_pinches(medial: _Medial, water: BaseGeometry) -> int:
+def _tie_pinches(medial: _Medial, local: _Local) -> int:
     """Tie the middle through a pinch it was cut at: an edge cut at the water's edge, to the nearest other piece.
 
     Where the water narrows below a step the samples' diagram crosses the bank
@@ -2305,7 +2750,7 @@ def _tie_pinches(medial: _Medial, water: BaseGeometry) -> int:
         if not len(near):
             continue
         target = int(near[np.argmin(np.hypot(*(medial.xy[near] - medial.xy[end]).T))])
-        if shapely.covers(water, LineString([medial.xy[end], medial.xy[target]])):
+        if local.covers(np.asarray([LineString([medial.xy[end], medial.xy[target]])], dtype=object))[0]:
             added.append((int(end), target))
     if added:
         one, other = np.asarray(added).T
@@ -2384,15 +2829,17 @@ def _anchor_edges(
 
 
 def _snap_joins(
-    body: int, points: np.ndarray, rings: list[np.ndarray], failures: list[dict[str, Any]]
+    body: int, points: np.ndarray, rings: list[np.ndarray], ring_tree: shapely.STRtree | None, failures: list[dict[str, Any]]
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Each join's nearest point on the raw contour, as the ring and segment it will be inserted into, and its distance."""
     if not len(points):
         return np.empty((0, 2)), np.empty(0, dtype=int), np.empty(0, dtype=int), np.empty(0)
-    lines = np.concatenate([_edges(coords) for coords in rings])
+    if ring_tree is None:
+        raise ValueError("joins with no contour to snap to")
+    lines = ring_tree.geometries
     ring_of = np.concatenate([np.full(len(coords) - 1, i) for i, coords in enumerate(rings)])
     segment_of = np.concatenate([np.arange(len(coords) - 1) for coords in rings])
-    (_, nearest), distance = shapely.STRtree(lines).query_nearest(shapely.points(points), return_distance=True, all_matches=False)
+    (_, nearest), distance = ring_tree.query_nearest(shapely.points(points), return_distance=True, all_matches=False)
     snapped = shapely.get_coordinates(
         shapely.line_interpolate_point(lines[nearest], shapely.line_locate_point(lines[nearest], shapely.points(points)))
     )
@@ -2472,7 +2919,7 @@ def _cap_source(coords: np.ndarray, bank: _Bank, tree: shapely.STRtree, joins: n
 def _centre_pieces(
     body: int,
     network: _Network,
-    water: BaseGeometry,
+    local: _Local,
     owners: _Owners,
     closed: _Closed,
     *,
@@ -2549,7 +2996,7 @@ def _centre_pieces(
             transitions.append(float(transition_by_edge.sum()) * min(share, 1.0))
     for piece, piece_values in zip(pieces, values, strict=True):
         row, line, keep = _validated_centre(
-            piece, piece_values, water, dam_tree, tolerance_m=tolerance_m, to_page=to_page, from_page=from_page, joins=network.join_xy
+            piece, piece_values, local, dam_tree, tolerance_m=tolerance_m, to_page=to_page, from_page=from_page, joins=network.join_xy
         )
         rows.append(row)
         decoded_lines.append(line)
@@ -2558,8 +3005,8 @@ def _centre_pieces(
     # A centre piece simplified apart may cross a contour or another centre piece; it gives back vertices, the contour does not.
     all_decoded, all_raw = [*contour_decoded, *decoded_lines], [*contour_raw, *raw_lines]
     offset = len(contour_decoded)
+    crossings, contacts = _crossings(all_decoded, all_raw, only=np.arange(offset, len(all_decoded)))
     for _ in range(MAX_REFINE_ROUNDS):
-        crossings = _crossings(all_decoded, all_raw, only=np.arange(offset, len(all_decoded)))
         touched = set()
         for one, other, where in crossings:
             for index in (one, other):
@@ -2579,14 +3026,15 @@ def _centre_pieces(
             break
         for i in touched:
             rows[i], decoded_lines[i], keeps[i] = _validated_centre(
-                pieces[i], values[i], water, dam_tree, tolerance_m=tolerance_m, to_page=to_page, from_page=from_page, joins=network.join_xy
+                pieces[i], values[i], local, dam_tree, tolerance_m=tolerance_m, to_page=to_page, from_page=from_page, joins=network.join_xy
             )
             all_decoded[offset + i] = decoded_lines[i]
-    for _, _, where in _crossings(all_decoded, all_raw, only=np.arange(offset, len(all_decoded))):
+        crossings, contacts = _crossings(all_decoded, all_raw, only=np.arange(offset, len(all_decoded)))
+    for _, _, where in crossings:
         failures.append(
             {"body": body, "kind": "crossing", "detail": "a centre piece crosses another line where the raw lines do not", "geometry": where}
         )
-    for _, _, where in _crossings(all_decoded, all_raw, contacts=True, only=np.arange(offset, len(all_decoded))):
+    for _, _, where in contacts:
         failures.append({"body": body, "kind": "contact", "detail": f"a centre piece passes within {CONTACT_M} m of another line", "geometry": where})
     for row, category, transition in zip(rows, categories, transitions, strict=True):
         row["body"] = body
@@ -2705,7 +3153,7 @@ def simplify_within(coords: np.ndarray, room: np.ndarray) -> np.ndarray:
 def _validated_centre(
     piece: _Piece,
     carried: np.ndarray,
-    water: BaseGeometry,
+    local: _Local,
     dam_tree: shapely.STRtree | None,
     *,
     tolerance_m: float,
@@ -2742,8 +3190,7 @@ def _validated_centre(
     initial = len(keep)
     if len(piece.pinned):
         keep = np.union1d(keep, piece.pinned)
-    raw_tree = shapely.STRtree(_edges(raw))
-    points = shapely.points(raw)
+    raw_index = _SegmentIndex.of(raw)
     for _ in range(MAX_REFINE_ROUNDS):
         coords = decoded(raw[keep], to_page, from_page)
         coords = _off_dams(raw[keep], coords, dam_tree, to_page, from_page, joins)
@@ -2760,11 +3207,11 @@ def _validated_centre(
         measured = {}
         for name, line in (("decoded", coords), ("before", raw[keep])):
             judged = segment_narrow if name == "before" else ~segment_narrow
-            (_, _), back = shapely.STRtree(_edges(line)).query_nearest(points, return_distance=True, all_matches=False)
+            back = _SegmentIndex.of(line).distance(raw, span)
             if not judged.any():
                 measured[name] = back
                 continue
-            forward, _ = _deviation_bound(line, raw_tree, gate=np.where(judged, np.maximum(segment_room, 0.0), np.inf))
+            forward, _ = _deviation_bound(line, raw_index, keep[:-1], keep[1:] - 1, gate=np.where(judged, np.maximum(segment_room, 0.0), np.inf))
             # A span of one raw segment: distance to it is convex along the segment, so its ends bound it exactly.
             single = np.flatnonzero(np.diff(keep) == 1)
             if len(single):
@@ -2803,8 +3250,8 @@ def _validated_centre(
     worst = int(np.argmax(held - allowance))
     simplified_segments = _edges(raw[keep])
     decoded_segments = _edges(coords)
-    dry = _dry(simplified_segments, water)
-    decoded_dry = _dry(decoded_segments, water)
+    dry = _dry(simplified_segments, local)
+    decoded_dry = _dry(decoded_segments, local)
     dam_clearance = float("inf")
     if dam_tree is not None:
         _, gaps = dam_tree.query_nearest(decoded_segments, return_distance=True, all_matches=False)
@@ -2851,21 +3298,22 @@ def _validated_centre(
     return row, LineString(coords), keep
 
 
-def _dry(segments: np.ndarray, water: BaseGeometry) -> tuple[float, float]:
+def _dry(segments: np.ndarray, local: _Local) -> tuple[float, float]:
     """The length of the segments outside the water, and the farthest any of it lies from the water."""
-    wet = shapely.covers(water, segments)
+    water = local.water
+    wet = local.covers(segments)
     if wet.all():
         return 0.0, 0.0
     length, far = 0.0, 0.0
     for segment in segments[~wet]:
         # A whole sea is slow to subtract from; the water round the segment is all that matters.
         x0, y0, x1, y1 = shapely.bounds(segment)
-        local = shapely.clip_by_rect(water, x0 - 1, y0 - 1, x1 + 1, y1 + 1)
-        outside = shapely.difference(segment, local)
+        around = shapely.clip_by_rect(water, x0 - 1, y0 - 1, x1 + 1, y1 + 1)
+        outside = shapely.difference(segment, around)
         length += float(outside.length)
         coordinates = shapely.get_coordinates(outside)
         if len(coordinates):
-            far = max(far, float(shapely.distance(shapely.points(coordinates), local).max()))
+            far = max(far, float(shapely.distance(shapely.points(coordinates), around).max()))
     return length, far
 
 

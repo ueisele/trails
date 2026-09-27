@@ -825,6 +825,83 @@ jumps between shoulders) and its growth over 12b's caps; the 2 m transition and 
 1 m anchor disc; holding the middle gate before encoding where the grid leaves it no room; and
 the 20 m jump separation that decides where the construction looks at all.
 
+**Done 2026-09-27 — 12c-2: the same geometry in 147 / 252 / 846 s instead of 326 / 401 / 4,292;
+under the 1.0× limit, short of the 0.5× target.** `paddle_geometry.py` and its tests only. Every
+frame `contours` returns is 12c's record for record (geometry as WKB, arrays as bytes) on all
+three whole maps, and on the twelve frozen patches and nine fixtures at the 1 m and the 0.5 m
+step, with one addition: a new report, `seam`, two rows in Lomsdal-Visten (below). No graph,
+page, tile or browser run, no new dependency, one process. Evidence, scripts and profiles are in
+scratch, `~/mockups/kayak-mode/offset-plan/phase-12c/speed/` (`README.md` first).
+
+| Offset geometry, whole map, s | Abisko | Malingsbo-Kloten | Lomsdal-Visten |
+|---|---:|---:|---:|
+| Before, 12c's run (of it the middle) | 326 (185) | 401 (157) | 4,292 (2,971) |
+| After (of it the middle) | 147 (75) | 252 (109) | 846 (375) |
+| Against the baseline graph build (161.8 / 388.0 / 1,025.4 s) | 0.91× | 0.65× | 0.83× |
+| Target 0.5× / limit 1.0× | 81 / 162 | 194 / 388 | 513 / 1,025 |
+| Largest body before → after | 191 → 59 | 70 → 25 | 3,903 → 572 (the sea) |
+| Peak RSS MB, 12c's code → after, same script | 644 → 695 | 511 → 563 | 1,793 → 2,143 |
+
+The brief's table added 12b's contour-only runs to 12c's, which already contain the contour;
+12c's run alone is the before figure. "The middle" is the construction up to the kept network,
+the rest the contour, the cuts, simplification and both gates.
+
+*Where the time went*, 12c's code under cProfile (349 / 436 / 4,506 s), and what changed —
+implementation choices, none of them Uwe's:
+
+| cProfile s, before → after | Abisko | Malingsbo-Kloten | Lomsdal-Visten |
+|---|---:|---:|---:|
+| Corner branches' `covers` test | 77 → 4 | 33 → 5 | 1,862 → 33 |
+| Closed-off water's edge index, per ring (`_cut`) | 42 → 2 | 57 → 4 | 901 → 8 |
+| Tiles: samples, Delaunay, Voronoi, clip | 29 → 30 | 49 → 51 | 640 → 154 |
+| Contour gates (`_validated`) / centre pieces | 34 → 23 / 60 → 42 | 86 → 52 / 79 → 70 | 131 → 77 / 114 → 97 |
+| Height owner lookups | 25 → 3 | 52 → 5 | 103 → 8 |
+| Closed-off water, opening (`_residue`) | 12 → 13 | 22 → 23 | 190 → 185 |
+
+- GEOS answers `covers` for a line that touches a polygon's outline by relating the whole
+  polygon (2.6 ms a line against a 200,000-vertex ring, 2 µs inside it), and every corner branch
+  ends on the bank. Such questions — corner branches, pinch ties, the dry test, the anchors'
+  distance to the opened water, the loop/terminal test on a large opened part — now read the
+  body's water cut into 1 km cells with a 100 m margin, which holds the body's outline near the
+  line vertex for vertex and in its own ring direction. The cut at the water's edge stays on the
+  whole water: in a cell it moved one pruned sea branch's end by 0.9 nm.
+- The closed-off water's edge index is built once per body; owner polygons and large seeds are
+  prepared; deviation bounds use GEOS's point-to-segment formula in numpy over the segments whose
+  envelopes can hold the nearest, bit for bit the tree's figure (a test in the suite).
+- A window growth kept recomputing every tile — six growths over the sea's four halving rounds,
+  8,289 tile computations. A growth now keeps the tiles no added seed comes near, which would come
+  out the same, and the cache holds exactly that pass's tiles as clearing did: 1,308 for the sea,
+  3,905 instead of 10,886 for the map. The seeds' layout is kept between rounds. Crossings and contacts take one pass; the overlap witness runs
+  in arrays. The caches are bounded (one layout, 64 cells): with more, the sea reached 4,018 MB
+  of the 4,096 MB address-space cap.
+- No gate or witness moved out of the build.
+
+*What remains.* The sea is 572 s of Lomsdal-Visten's 846. The map's offset and opening at 32
+chords, and the union and difference that give the closed-off water, take about 270 s under
+cProfile, nearly all of it the sea's; they are 12b's construction and cannot shrink without
+changing it. Beyond that the time is spread: tiles, pruning, and both gates (a third of Abisko's
+and Malingsbo-Kloten's time, a sixth of Lomsdal-Visten's). Reaching 0.5× would take a cheaper gate
+(proving the deviation bound from Douglas–Peucker and the grid's move instead of sampling it,
+which would move the per-segment figures out of the build) or a cheaper offset; both change
+what the build reports, and are for review.
+
+*12c's open items.* Lomsdal-Visten's whole-map cross sections measured along the gradient:
+3,258 of 3,258 within the gate, worst 0.931 m in 14.78 m of water at 13.555126 65.485547.
+Whole-map witnesses with the crop sought along the branch: every through, bay and island witness
+holds or is cut by the crop or a dam; the Lomsdal-Visten loop at 12.449706 65.857187 is now
+counted as cut (through 1,269 of 2,128, 859 cut). The two overlap edges without a counterpart lie
+in the sea 8,967 m outside the map: a straight bank sampled every metre faces a ring's corner
+there, close to cocircular, and the two tiles triangulate the same samples differently (GEOS's
+Delaunay then depends on the rest of each tile's samples). **A seam can lose a connection in
+principle** — two tiles' edges can end at different nodes on a border — though none did: those two
+edges are outside the map and every witness holds. The build now reports each such place beside a
+kept line as `seam` with its location; a clip computed a millimetre apart at radius d or the bank
+parts nothing and is not reported. That is those two rows and nothing else on the three maps.
+
+*For review.* Whether `seam` should stop a build or only report, and whether a seam should be
+repaired (joining the two ends, or triangulating a border once for both tiles), which would change
+the network; and whether to accept 0.91× for Abisko or move the gates' figures out of the build.
+
 ### Phase 12d — Attach the last metres and preserve the barriers
 
 *Files:* `libs/src/trails/network/water.py`, `paddle_geometry.py`, the phase-10 launch module
