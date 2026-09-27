@@ -25,9 +25,15 @@ from trails.routing.sources import BRIDGE, PADDLE, PATH, PORTAGE, NetworkSource
 SHORE = "Shore"
 OPEN_WATER = "Open water"
 STREAMS = "Streams"
+#: The line off the bank (``kayak-offset-phases.md`` §1.5): the middle of narrow water and the
+#: last metres from a bank anchor to the line, both paddled at factor 1 like Shore.
+NARROW_WATER = "Narrow water"
+LANDING_WATER = "Landing water"
 PORTAGES = "Portages"
 PORTAGE_PATHS = "Portage paths"
 WATER_SOURCES = (SHORE, OPEN_WATER, STREAMS)
+#: Every paddled source a lake's plane is laid on: the bank's two, and the line off the bank's four.
+LAKE_SOURCES = (SHORE, OPEN_WATER, NARROW_WATER, LANDING_WATER)
 #: Phase 9's 5 m tolerance sweep: shore p95 deviation 3.4–3.5 m, page growth 0.37–0.81 MB Brotli.
 #: Review accepted the sweep’s 8.4–32.5 % p95 search growth after phase 8.
 SHORE_SIMPLIFY_M = 5.0
@@ -85,11 +91,15 @@ class Access:
         dams: Dam points and lock gates, or None
         bank: The bank portages and launches measure to, or None where there
             is no paddled water
+        offset: The water the line off the bank is drawn from
+            (:class:`trails.network.paddle_network.Offset`), or None for a build
+            whose paddled line follows the bank, as every build did before it
     """
 
     surfaces: gpd.GeoDataFrame
     dams: gpd.GeoDataFrame | None = None
     bank: Bank | None = None
+    offset: Any = None
 
 
 class Paddle(NamedTuple):
@@ -584,18 +594,18 @@ def build(
         Measured combined network and per-source chain counts
     """
 
-    def node(items: list[NetworkSource]) -> Network:
+    def node(items: list[NetworkSource], bridge_m: float = params.bridge_m) -> Network:
         return build_network(
             items,
             clip,
             metric_crs=rules.metric_crs,
             stroke_angle_deg=params.stroke_deg,
             probe_m=params.probe_m,
-            bridge_m=params.bridge_m,
+            bridge_m=bridge_m,
             ferry_cost_m=params.ferry_cost_km * 1000,
         )
 
-    inferred = (PORTAGES, PORTAGE_PATHS, LAUNCHES)
+    inferred = (PORTAGES, PORTAGE_PATHS, LAUNCHES, BRIDGE)
     walking_sources = [source for source in sources if source.kind != PADDLE and source.name not in inferred]
     started = time.perf_counter()
     walking = node(walking_sources)
@@ -610,12 +620,37 @@ def build(
     sources[:] = [source for source in sources if source.name not in inferred] + added
     network = node(sources)
     print(f"  Combined graph build with carries and launches: {time.perf_counter() - started:.3f} s; {len(network.edges):,} edges")
+    assembled = None
+    if access.offset is not None:
+        # The line off the bank reads what it must keep reaching off the build above,
+        # which is the build without it; imported here, as it imports this module.
+        from trails.network import paddle_network
+
+        assembled = paddle_network.assemble(network, sources, access, metric_crs=rules.metric_crs)
+        for step, seconds in assembled.evidence["timings"].items():
+            print(f"  Line off the bank, {step.removesuffix('_s')}: {seconds:.3f} s")
+        sources[:] = assembled.sources
+        started = time.perf_counter()
+        # Every bridge is the build's above, carried over as a line; none is inferred again.
+        network = node(sources, bridge_m=0.0)
+        print(f"  Combined graph build with the line off the bank: {time.perf_counter() - started:.3f} s; {len(network.edges):,} edges")
+        assembled.evidence["validation"] = paddle_network.validate(network, assembled)
+        print(f"  Line off the bank after noding: {assembled.evidence['validation']}")
     report(network)
     network = replace(network, edges=graphs.derive(network.edges, masks, protected, rules))
     covered = chain_coverage(network.chains, network.edges)
     network = replace(network, chains=network.chains.assign(**{column: covered[column] for column in CHAIN_COVERAGE_COLUMNS}))
-    network, levels = level_lakes(measure(network), threshold_m=params.ascent_threshold_m)
-    network = open_level_streams(network)
+    if assembled is None:
+        network, levels = level_lakes(measure(network), threshold_m=params.ascent_threshold_m)
+        network = open_level_streams(network)
+    else:
+        from trails.network import paddle_network
+
+        network, probed = paddle_network.measured_with(network, assembled.probes, measure)
+        network, levels = level_lakes(network, threshold_m=params.ascent_threshold_m, shore_samples=paddle_network.shore_samples(probed))
+        # Phase 7's gate sums per-edge falls, so it decides on the stream edges as the build above cut them.
+        network = open_level_streams(network, decided_by=paddle_network.stream_edges(probed))
+        print(f"  Line off the bank: { ({key: value for key, value in assembled.evidence.items() if key not in ('timings', 'validation')}) }")
     differences = (levels["registered"] - levels["percentile"]).abs().dropna()
     print(
         f"  Lake levels: {len(levels):,} bodies; {levels['registered'].notna().sum():,} registered, "
@@ -658,29 +693,38 @@ def report(network: Network) -> None:
         network: The combined graph
     """
     print("\nWater in the routing graph:")
-    for name in (*WATER_SOURCES, PORTAGES, PORTAGE_PATHS, LAUNCHES):
+    # The line off the bank's two sources appear only in a build that has them.
+    present = [name for name in (NARROW_WATER, LANDING_WATER) if (network.edges["source"] == name).any()]
+    for name in (*WATER_SOURCES, *present, PORTAGES, PORTAGE_PATHS, LAUNCHES):
         edges = network.edges[network.edges["source"] == name]
         print(f"  {name}: {len(edges):,} edges, {edges['length_m'].sum() / 1000:.3f} km")
 
 
-def open_level_streams(network: Network) -> Network:
+def open_level_streams(network: Network, *, decided_by: gpd.GeoDataFrame | None = None) -> Network:
     """Allow both directions on level and rising stream chains.
 
     Args:
         network: Combined network after height sampling and lake levelling
+        decided_by: Measured stream edges, with ``chain_id``, ``length_m`` and
+            ``elevations``, that decide each chain instead of the network's own:
+            the chains as another build cut them. None decides on the network's
 
     Returns:
         A copied network with direction cleared on every edge of each opened chain
 
     Raises:
-        ValueError: If a stream has no chain or fewer than two finite height samples
+        ValueError: If a stream has no chain or fewer than two finite height
+            samples, or the deciding edges do not name the network's stream chains
     """
     streams = network.edges[network.edges["source"] == STREAMS]
     if streams["chain_id"].isna().any():
         raise ValueError("a stream needs a chain before its fall can be read")
+    judged = streams if decided_by is None else decided_by
+    if decided_by is not None and set(judged["chain_id"]) != set(streams["chain_id"]):
+        raise ValueError("the deciding stream edges must name exactly the network's stream chains")
     edges = network.edges.copy()
     opened: dict[str, list[tuple[int, float]]] = {"level": [], "rising": []}
-    for chain, parts in streams.groupby("chain_id", sort=False):
+    for chain, parts in judged.groupby("chain_id", sort=False):
         fall = 0.0
         for values in parts["elevations"]:
             heights = np.asarray(values, dtype=float)
@@ -693,8 +737,9 @@ def open_level_streams(network: Network) -> Network:
         # Noding must not open short pieces of a steep stream. All samples
         # already follow flow, even where the chain's canonical order does not.
         if fall < threshold:
-            edges.loc[parts.index, "one_way"] = False
-            opened["rising" if fall < -threshold else "level"].append((len(parts), length))
+            members = parts.index if decided_by is None else streams.index[streams["chain_id"] == chain]
+            edges.loc[members, "one_way"] = False
+            opened["rising" if fall < -threshold else "level"].append((len(members), length))
     for label, chains in opened.items():
         print(
             f"  Streams opened ({label}): {len(chains):,} chains, "
@@ -703,12 +748,15 @@ def open_level_streams(network: Network) -> Network:
     return replace(network, edges=edges)
 
 
-def level_lakes(network: Network, *, threshold_m: float) -> tuple[Network, pd.DataFrame]:
+def level_lakes(network: Network, *, threshold_m: float, shore_samples: dict[str, np.ndarray] | None = None) -> tuple[Network, pd.DataFrame]:
     """Replace only lake-edge heights with one level per connected body.
 
     Args:
         network: Network after the country's height reader has sampled its edges
         threshold_m: The same ascent threshold used by that reader
+        shore_samples: Bank heights per body to take the percentile of instead of
+            the network's own Shore: the bank's, where the network's Shore runs
+            off it. A body missing here reads its own Shore and Narrow water
 
     Returns:
         A copied network with lake profiles updated, and each body's registered,
@@ -719,7 +767,7 @@ def level_lakes(network: Network, *, threshold_m: float) -> tuple[Network, pd.Da
         ValueError: If a lake has neither a registered level nor a finite shore sample
     """
     chains = network.chains
-    lakes = chains[chains[LAKE_BODY].notna() & chains["source"].isin((SHORE, OPEN_WATER))]
+    lakes = chains[chains[LAKE_BODY].notna() & chains["source"].isin(LAKE_SOURCES)]
     bodies = network.edges["chain_id"].map(lakes.set_index("chain_id")[LAKE_BODY])
     edges = network.edges.copy()
     elevations = list(edges["elevations"])
@@ -728,8 +776,12 @@ def level_lakes(network: Network, *, threshold_m: float) -> tuple[Network, pd.Da
         registered = pd.to_numeric(parts[LAKE_LEVEL], errors="raise").min()
         positions = np.flatnonzero((bodies == body).to_numpy())
         shore = edges.iloc[positions]
-        series = [np.asarray(values, dtype=float) for values in shore.loc[shore["source"] == SHORE, "elevations"]]
-        samples = np.concatenate(series) if series else np.empty(0)
+        if shore_samples is not None and str(body) in shore_samples:
+            samples = shore_samples[str(body)]
+        else:
+            own = (SHORE,) if shore_samples is None else (SHORE, NARROW_WATER)
+            series = [np.asarray(values, dtype=float) for values in shore.loc[shore["source"].isin(own), "elevations"]]
+            samples = np.concatenate(series) if series else np.empty(0)
         finite = samples[np.isfinite(samples)]
         percentile = float(np.percentile(finite, 10)) if len(finite) else np.nan
         level = float(registered) if pd.notna(registered) else percentile

@@ -1069,6 +1069,160 @@ credit each source, including partial-edge endpoints. Walking excludes all new w
 growth. Stop on quadratic chord generation, duplicate mouths, or validation lost during
 encoding. Whole-map capacity is still unmeasured; proxy bytes do not pass release budgets.
 
+*Uwe said "Ja" to 12e on 2026-09-27.* **Review's decisions, taken before the phase (not Uwe's):**
+
+1. Stream directions keep phase 7's decisions exactly: decided on today's cuts, as main nodes the
+   streams against `Bank`'s lines, and carried by chain onto the new, finer edges; proved on every chain.
+2. The build keeps its behaviour behind one setting, default off, until 12g: off, graph and page are
+   main's byte for byte; on, the offset network replaces the bank-following one.
+3. The open-water chords follow today's rule on the new lines: Delaunay edges the region the new
+   travel lines enclose covers, less their own segments, lake-owned seams once; no new crossing
+   policy, nothing quadratic; a case the rule does not carry is a stop.
+4. The water feeding `contours()` is loaded at least 17.1 m beyond the map box; `Bank`, and so every
+   carry and launch, stays as today.
+
+**Stopped 2026-09-27 — 12e: the line off the bank is wired in behind `paddle_offset`, off by
+default, and the switch-off graph is main's byte for byte; Abisko's switch-on build takes 414.2 s,
+2.56× the baseline, over the 2× line.** Everything else the phase asks is built and holds on
+Abisko. Evidence, scripts and logs are in scratch, `~/mockups/kayak-mode/offset-plan/phase-12e/`
+(`README.md` first). No page, tile or browser run, no push, no new dependency.
+
+*What changed.* `routing/sources.py`: a source's `role` (`travel`, `landing`, `open`, `stream`) and
+`settled` flag. `routing/graph.py`: a settled line's ends are never loose, no bridge lands on it, and
+each end joins the line it lies on within the node tolerance, as launch ends do. `network/graphs.py`:
+`Params.paddle_offset`, and `edge_costs` carries a role into the page. New
+`network/paddle_network.py`: the assembly below, the checks after noding, and the halo. `water.py`:
+the build behind the switch, `Access.offset`, lake planes and stream decisions that can read
+another build's edges, the two new source names. `paddle_geometry.py`: the offset region per body,
+and the deviation proof. `sweden.py`, `norway.py`: the halo-loaded water, only with the switch on.
+`encoding.py`: refuses a table where only some paddled sources carry a role, or an unknown one.
+`js/routing_graph.js`: decodes `roleOf` (per source) and `bankAnchor` (per node). The park table's
+`paddle_offset` and a `--paddle-offset` flag in `route_graph.py` and `lomsdal_visten.py`; the
+source totals there and in `water.report` list the new sources. Tests in `test_paddle_network.py`,
+`test_encoding.py` (the page's decoder run in Node on a payload with every role) and
+`test_kayak_routing.py`.
+
+*Off is main.* Abisko built with the switch off from cached inputs (`build.py`): the encoded data
+stream and every graph field of the header are byte-identical to the published page's
+(`b842a001…`), and edges and chains, geometry, values and heights, to phase 10's frozen ones:
+105,923 edges, 49,101 nodes, 257,555 vertices, graph Brotli 1,693,176 bytes (12a's figure, so its
+method is reproduced), 161.8 s. **The page is not quite:** the decoder's
+role block is new text in it, and reads nothing on a graph without roles. For review below.
+
+*How the switch-on build works — implementation choices, not Uwe's.* The build first nodes
+today's network as it always has; everything the line must keep reaching is read off it: 12a's
+contact inventory in production form (launch and carry ends, ways at the bank and over the water,
+bridges, mouths, stream ends, dam sides), every bridge, the stream edges phase 7 decides on and the
+bank samples phase 9's lake planes read. The offset network then replaces Shore, Open water and
+Streams and is noded once more with bridge inference off:
+
+- **Sources** (roles in brackets): Shore = contour, factor 1 (travel); Narrow water = centre lines and
+  transitions, 1 (travel); Landing water = spurs and mouth joins, 1 (landing); Open water = caps held
+  by two shoulders, chords, the exact interfaces, interface links, 12d's open-water spurs and lake
+  crop seams, 1.5 (open); Streams unchanged (stream). All but Streams are settled. Lake owners of the
+  halo-loaded water take the bank's labels and registered levels by their delivery rows (364
+  matched, 1 lake only in the halo, 0 merged).
+- **Chords**: Delaunay edges between the written contour's vertices (Shore and caps), kept where
+  one owner's unsimplified offset region, cut to the extent, covers them within 0.1 m (the written
+  vertices lie a grid move off it), that are not a contour segment, not within 0.1 m along an
+  interface or crop seam, and meet no contour, interface or seam between their ends; then cut at the
+  dam discs as today. A lake keeps its crop seam. Abisko: 93,491 candidates, 32,533 contour segments,
+  32,070 outside the region, 25 along an interface, 26 meeting a line, **28,837 chords**. Caps and
+  centre transitions needed no rule of their own: a cap is part of the region's outline, and the
+  centre lines lie outside it and meet it at pinned join vertices.
+- **Noding**: a spur's bank end is the contact's own coordinate, its line end the exact nearest point
+  of its target, joined by the settled join; a mouth join starts on its stream the same way; each
+  written piece end at an interface is inserted into the interface (296). 12c's contacts where two
+  written lines cross (59 on Abisko) are noded by the build at the crossing; none needed a shared
+  vertex. A dam anchor whose written point 12c's rule moved out of the disc moves the carry, launch
+  or bridge ending there with it (none on Abisko; tested). 17 duplicate Landing water lines dropped
+  (a stream end reached both as a contact and as a mouth); none remain.
+- **Bridges**: every bridge of the first noding, carried over as a settled line; none is inferred
+  again. Abisko: 551 as they were (land and streams), 391 now ending at their anchor, 1 between two
+  bodies to both anchors, 972 between two banks of one body dropped (the water joins them), 74
+  dropped whose bank end has no spur, all at the crop, as phase 9 left such ends.
+- **Stream directions**: phase 7's gate reads the first noding's stream edges, measured with the
+  new network in one pass of the height model, and its decision is carried to the new edges by chain;
+  lake planes read the first noding's bank samples the same way.
+
+*Abisko, switch on, against 12a's baseline:*
+
+| | Baseline (switch off) | Switch on | Ratio / growth |
+|---|---:|---:|---:|
+| Edges / nodes / vertices | 105,923 / 49,101 / 257,555 | 119,051 / 60,912 / 300,073 | 1.124 / 1.241 / 1.165 (limit 1.5) |
+| Graph Brotli bytes (12a's method) | 1,693,176 | 1,815,873 | +122,697 (page allowance +0.5 MB) |
+| Graph build s | 161.8 (161.8 here) | 414.2 (401.3 in an earlier run of the same graph) | **2.56×** (2× = 323.6) |
+| Peak RSS MB | 1,375 | 1,651 | |
+
+| Source, switch on | Edges | km | Bytes it costs the graph |
+|---|---:|---:|---:|
+| Shore | 27,621 | 752.701 | 193,349 |
+| Narrow water | 7,174 | 239.816 | 172,103 |
+| Landing water | 3,485 | 25.516 | 66,427 |
+| Open water | 31,179 | 3,412.483 | 498,270 |
+| Streams | 2,219 | 55.807 | 35,346 |
+| Bridges | 1,011 (1,989 off) | 4.416 (15.789) | 12,068 |
+
+"Bytes it costs" is the graph re-encoded without that source, subtracted. Walking: 44,994 → 45,138
+edges, 1,601.6 km both (the new lines node the ways that cross them); carries, ties and launches
+keep their lengths to the metre.
+
+*Kept and checked on Abisko.* Every stream chain keeps phase 7's direction: 311 of 311, 277 one way
+in both, 130 now cut into more edges and 218 cut at different places. Every lake plane is the
+bank's: 364 of 364. After noding and the page's grid: Shore at least **12.9602 m** from the
+unsimplified bank, no segment under 12 m, nothing dry; Narrow water 25.766 m dry over 1,209 edges
+near the bank (12c's 25.89 m); Landing water 479.318 m outside the water, bank steps included;
+Open water 2.164 m, all within 0.1 m of the bank (interface ends, caps, links; the chords lie at
+least 12 m inside). Loose ends: Shore 24 (the crop), Narrow water 1,045 (bay branches ending at
+the bank, as 12c kept them), Open water 81 (interface and seam ends on the bank), **Landing water
+1,566, every one a bank anchor with nothing left on land** — mostly where the only land side was a
+bridge between two banks of one body; no spur's line end failed to node (the six ends found within
+2 cm of a line are anchors beside a centre branch's end). No dam in Abisko's water.
+
+*Build time.* The 12c-2 option: on every segment Douglas–Peucker chose alone, the 2.1 m bound is
+proved (both directions: a dropped vertex lies within the tolerance of its segment, and the raw run
+crosses the perpendicular through any point of the segment within the tolerance; the grid adds each
+segment's larger end move; the bound is the segment's largest dropped distance plus that move),
+and only segments a pinned or given-back vertex split are sampled. On
+Abisko's whole contour (`proof.py`): 3,798 pieces identical both ways, every sampled figure within
+its proved bound, largest bound 2.0999 m, 986 pieces with a split segment; the contour 132.1 →
+122.2 s. The sampled figures are in the tests and the evidence, not the build. It is not enough:
+
+| Abisko graph build, s | Switch off | Switch on |
+|---|---:|---:|
+| Loading (the bank's outlines 15.2 / 16.2 of it) | 17.0 | 18.1 |
+| Walking noding | 26.9 | 25.4 |
+| Noding with carries and launches | 64.2 | 64.3 |
+| Line off the bank: contacts / bodies / contours / landings / chords / assembly | – | 0.4 / 2.7 / 138.9 / 8.3 / 6.6 / 5.3 |
+| Noding again, bridges carried | – | 75.8 |
+| Checks after noding | – | 3.7 |
+| Derived fields / heights (with the probes) / the rest | 20.1 / 20.5 / 13.0 | 21.3 / 25.3 / 17.8 |
+| **Total** | **161.8** | **414.2** |
+
+Options, none of them changing a line: (a) the offset geometry body by body in worker processes —
+Abisko's largest body took 59 s in 12c-2, so the step floors near that, about 80 s less, still
+about at the 2× line (about 334 s); (b) keep the offset geometry by a digest of its inputs (halo water, dams, anchors,
+code), so a rebuild of unchanged water skips about 160 s (about 255 s, 1.6×) and only a first build pays;
+(c) node the new water into the finished walking network instead of noding everything a second
+time (71 s), a refactor of the graph build whose identity would need proving; (d) a larger
+allowance for 12g. For Uwe or review; the gate is not weakened here.
+
+*What 12f must know.* With the switch on every paddled source in the header carries `role`, and
+the page's graph has `roleOf` (by source) and `bankAnchor` (by node: 1 where Landing water is the
+only paddled line). Nothing routes differently for either; the snapping of §1.6 is 12f's. The
+1,566 dead-end spurs are bank anchors a tap must not snap to. Phase 11's interior entries see the
+new lines as they are: every Shore, Narrow water, Landing water and Open water segment is an
+eligible kayak segment, and the bank anchors are nodes like any; excluding Landing water and bank
+anchors there, as snapping excludes them, is 12f's to measure (§4.3). Open water is still one
+source by that name, as `plan_mode.js` requires.
+
+*For review.* Whether the decoder's role block may change the page while the switch is off, or
+belongs in 12f; the build-time options; whether the 1,566 dead-end spurs (anchors whose only land
+side was a bridge between two banks of one body, or the crop) should be left out rather than drawn;
+the 74 bridges dropped at a bank end without a spur; and the choices marked above. Malingsbo-Kloten
+and Lomsdal-Visten were not built: 12g. Malingsbo-Kloten's stream directions are phase 7's by
+construction (the gate reads the first noding's edges) and by the tests, not yet by a build.
+
 ### Phase 12f — The tap, the line and the figures
 
 *Files:* `libs/src/trails/visualization/js/plan_mode.js` snapping/pricing/tally regions,

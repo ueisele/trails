@@ -185,6 +185,27 @@
                     nodeLat[toNode[i]] = coordinates[last + 1];
                 }
 
+                // What each paddled line is for, where the line runs off the
+                // bank: 'travel', 'landing', 'open' or 'stream', by source, and
+                // null on a graph whose paddled line follows the bank. A bank
+                // anchor is a node Landing water reaches and no other paddled
+                // line does: the bank end of the last metres, which a tap near
+                // the bank must not snap to. Nothing routes differently for
+                // either; they are what snapping reads.
+                var roleOf = header.sources.map(function (source) { return source.role || null; });
+                var bankAnchor = new Uint8Array(header.nodes);
+                if (roleOf.some(function (role) { return role !== null; })) {
+                    var reached = new Uint8Array(header.nodes);
+                    for (i = 0; i < edges; i += 1) {
+                        var role = roleOf[sources[i]];
+                        if (role === null) { continue; }
+                        var bit = role === 'landing' ? 1 : 2;
+                        reached[fromNode[i]] |= bit;
+                        reached[toNode[i]] |= bit;
+                    }
+                    for (i = 0; i < header.nodes; i += 1) { bankAnchor[i] = reached[i] === 1 ? 1 : 0; }
+                }
+
                 return {
                     header: header,
                     // Composing a chain runs its edges from chainAt[c] to
@@ -200,6 +221,7 @@
                     vertexAt: vertexAt, coordinates: coordinates,
                     sampleAt: sampleAt, heights: heights,
                     nodeLon: nodeLon, nodeLat: nodeLat,
+                    roleOf: roleOf, bankAnchor: bankAnchor,
                     nearestNode: nearestNode.bind(null, nodeLon, nodeLat)
                 };
             }

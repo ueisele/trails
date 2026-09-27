@@ -33,9 +33,10 @@ from typing import Any, NamedTuple
 
 import geopandas as gpd
 import pandas as pd
+from shapely.geometry import box
 
 from trails.io.sources import markhojd, marktacke, naturvardsregistret, overpass, topografi50
-from trails.network import graphs, water
+from trails.network import graphs, paddle_network, water
 from trails.network.graphs import PROTECTED_SIMPLIFY_M, SURVEYED_FIELD, Masks, Rules
 from trails.routing import DEFAULT_MARKED_M, DEFAULT_MIN_SHARE, DEFAULT_RECORDED_M, IDENTITY_SEPARATOR, Network, NetworkSource, with_elevation
 from trails.routing.chains import parts_of
@@ -447,6 +448,13 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
         extent=zone,
     )
     sources.extend(paddled.sources)
+    offset = None
+    if params.paddle_offset:
+        # Whole features are loaded by the box, so a bank just outside it can be the edge of
+        # one the box left out (12b): the line reads water loaded a halo wider. The bank does not.
+        halo = paddle_network.halo_bounds(zone, METRIC_CRS)
+        wide = marktacke.Source(cache_dir=params.cache_dir).water(halo, params.water_municipalities).to_crs("EPSG:4326")
+        offset = paddle_network.Offset(wide, box(*halo), zone, topografi50.TYPE, (topografi50.LAKE_CLASS,), topografi50.WATER_LEVEL)
 
     versions = {
         LEDER: register.versions.get(naturvardsregistret.TRAILS_FILE),
@@ -480,10 +488,10 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
         geometry="geometry",
         crs="EPSG:4326",
     )
-    return Loaded(sources=sources, versions=versions, protected=protected, winter=winter, access=water.Access(surfaces, dams, paddled.bank))
+    return Loaded(sources=sources, versions=versions, protected=protected, winter=winter, access=water.Access(surfaces, dams, paddled.bank, offset))
 
 
-def edge_costs(sources: list[NetworkSource], params: Params) -> dict[str, dict[str, float]]:
+def edge_costs(sources: list[NetworkSource], params: Params) -> dict[str, dict[str, Any]]:
     """Say what a metre on each dataset costs a route; see :func:`graphs.edge_costs`."""
     return graphs.edge_costs(sources, params)
 

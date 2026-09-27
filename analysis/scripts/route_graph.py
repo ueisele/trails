@@ -250,10 +250,10 @@ def report(
             print(f"    {which.gateway:<18} {distance:,.2f} m away{' — it sits on it' if distance < reach_m else ''}")
 
     print("\n  cost")
-    print(f"    {'source':<12} {'factor':>7} {'edges':>9} {'km':>8}")
+    print(f"    {'source':<14} {'factor':>7} {'edges':>9} {'km':>8}")
     for source, group in edges.groupby("source"):
         factor = "flat" if group["kind"].iloc[0] == FERRY else f"{(group['cost'] / group['length_m']).mean():.2f}"
-        print(f"    {str(source):<12} {factor:>7} {len(group):>9,} {group['length_m'].sum() / 1000:>8,.0f}")
+        print(f"    {str(source):<14} {factor:>7} {len(group):>9,} {group['length_m'].sum() / 1000:>8,.0f}")
 
     report_attributes(network.chains, sources)
     report_derived(network, country.graph)
@@ -559,7 +559,7 @@ def graph_norway(which: Park, args: argparse.Namespace, country: Country, repo_r
     """
     if args.ut_routes is None:
         args.ut_routes = str(repo_root / "analysis" / "routes" / which.ut_routes) if which.ut_routes else ""
-    params = norway.Params.from_args(args)
+    params = norway.Params.from_args(args, paddle_offset=args.paddle_offset or which.paddle_offset)
     park = naturbase.Source(cache_dir=params.cache_dir).find_one(which.name, layer=naturbase.Layer.NATIONAL_PARK)
     zone = norway.zone_around(park, params.approach_km)
     loaded = norway.load_sources(params, zone)
@@ -603,7 +603,12 @@ def graph_sweden(which: Park, args: argparse.Namespace, country: Country) -> Gra
     # `approach_km` shapes the Norwegian band and nothing here; left in the
     # key it forced a full rebuild, height pass and all, of an identical graph
     # whenever the docstring's own `--approach-km 5` was typed (§8.2).
-    params = dataclasses.replace(sweden.Params.from_args(args), approach_km=0.0, water_municipalities=which.water_municipalities)
+    params = dataclasses.replace(
+        sweden.Params.from_args(args),
+        approach_km=0.0,
+        water_municipalities=which.water_municipalities,
+        paddle_offset=args.paddle_offset or which.paddle_offset,
+    )
     register = naturvardsregistret.Source(cache_dir=params.cache_dir)
     if which.form is None:
         raise ValueError(f"{which.name} declares no register form")
@@ -680,6 +685,11 @@ def main() -> int:
     parser.add_argument("--reach-m", type=float, default=150.0, help="How close a component must pass a quay or town to count as reaching it")
     parser.add_argument("--rebuild", action="store_true", help="Rebuild the graph even if a cached one matches")
     parser.add_argument("--force-download", action="store_true", help="Re-download source data instead of using the cache")
+    parser.add_argument(
+        "--paddle-offset",
+        action="store_true",
+        help="Paddle the line 15 m off the bank on this build, whatever the park's own setting (kayak-offset-phases.md)",
+    )
     args = parser.parse_args()
     which: Park = PARKS[args.park]
     country = COUNTRIES[which.country]

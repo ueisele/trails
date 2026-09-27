@@ -136,6 +136,11 @@ class Params:
         ascent_threshold_m: Gains under this are not counted as climb
         force_download: Re-download source data instead of using the cache
         rebuild: Rebuild the graph even if a cached one matches
+        paddle_offset: Paddle the line 15 m off the bank (``kayak-offset-phases.md``)
+            instead of along it. Off until a map's full build is reviewed (12g); off,
+            a build is byte for byte the one before the setting existed. Not in the
+            cache key: it changes only paddled water, and a build with paddled water
+            is never cached.
     """
 
     cache_dir: str
@@ -151,6 +156,7 @@ class Params:
     ascent_threshold_m: float = DEFAULT_ASCENT_THRESHOLD_M
     force_download: bool = False
     rebuild: bool = False
+    paddle_offset: bool = False
 
     @classmethod
     def from_args(cls, args: argparse.Namespace, **overrides: Any) -> Self:
@@ -231,7 +237,7 @@ def with_capture_date(gdf: gpd.GeoDataFrame, field: str) -> gpd.GeoDataFrame:
     return gdf.assign(**{SURVEYED_FIELD: captured})
 
 
-def edge_costs(sources: list[NetworkSource], params: Params) -> dict[str, dict[str, float]]:
+def edge_costs(sources: list[NetworkSource], params: Params) -> dict[str, dict[str, Any]]:
     """Say what a metre on each dataset costs a route.
 
     For a consumer that has the geometry but not the cost column, which is the
@@ -249,11 +255,14 @@ def edge_costs(sources: list[NetworkSource], params: Params) -> dict[str, dict[s
 
     Returns:
         What each source costs, by source name, including the connectors that
-        belong to no source at all
+        belong to no source at all; a paddled source with a role carries it too
     """
-    costs: dict[str, dict[str, float]] = {}
+    costs: dict[str, dict[str, Any]] = {}
     for source in sources:
         costs[source.name] = {"flatM": params.ferry_cost_km * 1000} if source.kind == FERRY else {"factor": source.cost_factor}
+        if source.role is not None:
+            # What the line is for travels beside its price: the page snaps to a travel line, not to a landing.
+            costs[source.name]["role"] = source.role
     # Nobody drew a connector, and :func:`build` leaves its factor at the
     # default, so this is the same number the edges were weighted with.
     costs[BRIDGE] = {"factor": DEFAULT_BRIDGE_COST_FACTOR}

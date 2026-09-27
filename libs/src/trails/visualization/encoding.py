@@ -91,7 +91,7 @@ from trails.network.water import DAM_CUT_M
 from trails.routing.coverage import MARKED, UNKNOWN, UNMARKED
 from trails.routing.order import CHAIN_ORDER_COLUMNS
 from trails.routing.protection import PROTECTED_COLUMN
-from trails.routing.sources import FERRY
+from trails.routing.sources import FERRY, PADDLE, WATER_ROLES
 from trails.visualization.water import check_rivers, check_water
 
 #: What the decoder in the page expects. Bump it when the layout changes, so a
@@ -583,6 +583,16 @@ def _source_table(edges: gpd.GeoDataFrame, costs: dict[str, dict[str, Any]]) -> 
     if len(pairs) > 256:
         raise ValueError(f"a source code is one byte and there are {len(pairs)} sources")
     table = [{"name": name, "kind": kind, **costs[name]} for name, kind in pairs]
+    # A page telling travel lines from landings must be told about every paddled source,
+    # or a tap would snap to a line whose role it cannot read.
+    paddled = [row for row in table if row["kind"] == PADDLE]
+    unknown = sorted(row["name"] for row in paddled if "role" in row and row["role"] not in WATER_ROLES)
+    if unknown:
+        raise ValueError(f"{unknown} carry a role the page does not know; the roles are {WATER_ROLES}")
+    if any("role" in row for row in paddled) and not all("role" in row for row in paddled):
+        raise ValueError(
+            f"either every paddled source carries a role or none does; {[row['name'] for row in paddled if 'role' not in row]} carry none"
+        )
     return table, {name: position for position, (name, _) in enumerate(pairs)}
 
 

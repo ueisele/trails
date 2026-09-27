@@ -29,6 +29,14 @@ LAUNCH = "launch"
 #: chain, because no source ever drew it.
 BRIDGE = "bridge"
 
+#: What a paddled line is for, when the line runs off the bank. ``travel``: the
+#: line a tap near the bank snaps to (the offset contour and the middle of narrow
+#: water); ``landing``: the last metres from a bank anchor to it, never snapped
+#: to; ``open``: a crossing of open water, kept for deliberate open-water taps;
+#: ``stream``: a class-2 stream, kept for river taps.
+TRAVEL, LANDING, OPEN, STREAM = "travel", "landing", "open", "stream"
+WATER_ROLES = (TRAVEL, LANDING, OPEN, STREAM)
+
 
 @dataclass(frozen=True)
 class NetworkSource:
@@ -63,6 +71,14 @@ class NetworkSource:
             noding this source against the others. Raw GPS density otherwise
             shatters every line such a track runs along. The chain and the edges
             keep the full geometry.
+        role: What a paddled line is for, carried into the page beside its price
+            so that a tap can tell the travel lines from the last metres to a
+            bank: one of :data:`WATER_ROLES`, or None where the build draws no
+            such distinction.
+        settled: The build placed this line's ends exactly where they join, so
+            none of them is a loose end looking for a bridge, no loose end
+            bridges onto it, and each end joins whatever line it lies on within
+            the node tolerance.
     """
 
     name: str
@@ -75,3 +91,10 @@ class NetworkSource:
     placeholder_identities: frozenset[str] = frozenset()
     node_simplify_m: float = 0.0
     directed: bool = False
+    role: str | None = None
+    settled: bool = False
+
+    def __post_init__(self) -> None:
+        """Refuse a role the page does not know."""
+        if self.role is not None and self.role not in WATER_ROLES:
+            raise ValueError(f"{self.name}: unknown role {self.role!r}, expected one of {WATER_ROLES}")

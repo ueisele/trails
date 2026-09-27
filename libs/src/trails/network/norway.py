@@ -30,7 +30,7 @@ from shapely.geometry import box
 from trails.io.sources import hoydedata_dtm, kommuneinfo, n50, naturbase, overpass, stedsnavn, traktorvegsti, ut
 from trails.io.sources.geonorge import Source as GeonorgeSource
 from trails.io.sources.language import Language
-from trails.network import graphs, water
+from trails.network import graphs, paddle_network, water
 from trails.network.graphs import PROTECTED_SIMPLIFY_M, SURVEYED_FIELD, Masks, Rules
 from trails.routing import (
     DEFAULT_MARKED_M,
@@ -469,6 +469,12 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
         surfaces, metric_crs=METRIC_CRS, class_field="objtype", lake_classes=("Innsjø", "InnsjøRegulert"), level_field="hoyde", extent=zone
     )
     sources.extend(paddled.sources)
+    offset = None
+    if params.paddle_offset:
+        # The line reads the water a halo wider than the zone, as in Sweden; the bank does not.
+        halo = paddle_network.halo_bounds(zone, METRIC_CRS)
+        wide = cover[cover["objtype"].isin(n50.WATER_COVER_TYPES) & cover.intersects(box(*halo))]
+        offset = paddle_network.Offset(wide, box(*halo), zone, "objtype", ("Innsjø", "InnsjøRegulert"), "hoyde")
 
     # One order covers all three N50 layers, so all three carry its date. The
     # height model is not here: it is read per point rather than ordered, and
@@ -490,10 +496,12 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
     # same extent and cannot answer differently.
     print("\nLoading protected areas (Naturbase)...")
     protected = load_protected(params, zone)
-    return Loaded(sources=sources, municipalities=codes, versions=versions, protected=protected, access=water.Access(surfaces, bank=paddled.bank))
+    return Loaded(
+        sources=sources, municipalities=codes, versions=versions, protected=protected, access=water.Access(surfaces, bank=paddled.bank, offset=offset)
+    )
 
 
-def edge_costs(sources: list[NetworkSource], params: Params) -> dict[str, dict[str, float]]:
+def edge_costs(sources: list[NetworkSource], params: Params) -> dict[str, dict[str, Any]]:
     """Say what a metre on each dataset costs a route; see :func:`graphs.edge_costs`."""
     return graphs.edge_costs(sources, params)
 

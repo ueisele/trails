@@ -139,7 +139,9 @@ def build_network(
 
     edges, nodes, stopped = _split_into_edges(chains, {source.name: source for source in sources}, ferry_cost_m, tolerance_m)
     edges, nodes, stopped = _join_launches(edges, nodes, stopped, tolerance_m)
-    edges, nodes = _with_bridges(edges, nodes, stopped, bridge_m, bridge_cost_factor, tolerance_m)
+    settled = {source.name for source in sources if source.settled}
+    edges, nodes, stopped = _join_settled(edges, nodes, stopped, settled, tolerance_m)
+    edges, nodes = _with_bridges(edges, nodes, stopped, bridge_m, bridge_cost_factor, tolerance_m, settled=settled)
 
     # Inferred chords take part in noding but are never a selectable way.
     chains = chains[~chains["kind"].map(_inferred).astype(bool)].reset_index(drop=True)
@@ -226,7 +228,8 @@ def _split_into_edges(
         for index, (piece, start_cut, end_cut) in enumerate(zip(pieces, cuts[:-1], cuts[1:], strict=True)):
             if piece is None:
                 continue
-            first_stop, last_stop = index == 0, index == len(pieces) - 1
+            # A settled line's ends were placed where they join: they stop nothing.
+            first_stop, last_stop = index == 0 and not source.settled, index == len(pieces) - 1 and not source.settled
             if source.directed and bool(chains["flow_reversed"].iloc[position]):
                 piece = shapely.reverse(piece)
                 start_cut, end_cut = end_cut, start_cut
@@ -290,7 +293,30 @@ def _join_launches(
     if not launches.any():
         return edges, nodes, stopped
     ends = np.unique(edges.loc[launches, ["from_node", "to_node"]].to_numpy().ravel())
-    eligible = np.flatnonzero(edges["kind"].isin((PATH, PADDLE)).to_numpy())
+    return _join_ends(edges, nodes, stopped, ends, np.flatnonzero(edges["kind"].isin((PATH, PADDLE)).to_numpy()), tolerance_m)
+
+
+def _join_settled(
+    edges: gpd.GeoDataFrame, nodes: gpd.GeoDataFrame, stopped: np.ndarray, settled: set[str], tolerance_m: float
+) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, np.ndarray]:
+    """Node the ends of settled lines onto whatever line they lie on, as launch ends are.
+
+    A spur ends on the nearest point of its line, and a bridge carried over from an
+    earlier build on the point of the edge it reached: exact up to rounding, which an
+    overlay intersection can miss. Every line is eligible, as every line was a bridge's
+    target; an end already on the line's own node is left as it is.
+    """
+    own = edges["source"].isin(settled).to_numpy()
+    if not own.any():
+        return edges, nodes, stopped
+    ends = np.unique(edges.loc[own, ["from_node", "to_node"]].to_numpy().ravel())
+    return _join_ends(edges, nodes, stopped, ends, np.arange(len(edges)), tolerance_m)
+
+
+def _join_ends(
+    edges: gpd.GeoDataFrame, nodes: gpd.GeoDataFrame, stopped: np.ndarray, ends: np.ndarray, eligible: np.ndarray, tolerance_m: float
+) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, np.ndarray]:
+    """Join the given nodes to the eligible edges passing within the tolerance, cutting an edge where one reaches its middle."""
     tree = shapely.STRtree(edges.geometry.to_numpy()[eligible])
     pairs = tree.query(nodes.geometry.to_numpy()[ends], predicate="dwithin", distance=tolerance_m)
     cuts: dict[int, list[float]] = {}
@@ -377,7 +403,9 @@ def _cost(length_m: float, chain_length_m: float, source: NetworkSource, ferry_c
     return length_m * source.cost_factor
 
 
-def _nearest_edges(edges: gpd.GeoDataFrame, nodes: gpd.GeoDataFrame, loose: np.ndarray, bridge_m: float) -> dict[int, int]:
+def _nearest_edges(
+    edges: gpd.GeoDataFrame, nodes: gpd.GeoDataFrame, loose: np.ndarray, bridge_m: float, settled: set[str] | None = None
+) -> dict[int, int]:
     """Find the edge each loose end could reach, if any.
 
     Args:
@@ -385,6 +413,7 @@ def _nearest_edges(edges: gpd.GeoDataFrame, nodes: gpd.GeoDataFrame, loose: np.n
         nodes: Their nodes
         loose: Node ids with only one edge on them
         bridge_m: How far a loose end may reach
+        settled: Sources no bridge may land on
 
     Returns:
         Nearest edge per loose end, by position in ``edges``, leaving out the
@@ -401,9 +430,10 @@ def _nearest_edges(edges: gpd.GeoDataFrame, nodes: gpd.GeoDataFrame, loose: np.n
     found = shapely.STRtree(geometries).query(points[loose], predicate="dwithin", distance=bridge_m)
 
     nearest: dict[int, tuple[float, int]] = {}
+    barred = edges["source"].isin(settled).to_numpy() if settled else np.zeros(len(edges), dtype=bool)
     for offset, position in zip(found[0], found[1], strict=True):
         node, edge = int(loose[offset]), int(position)
-        if edge in incident[node]:
+        if edge in incident[node] or barred[edge]:
             continue
         candidate = (float(shapely.distance(points[node], geometries[edge])), edge)
         if candidate < nearest.get(node, (float("inf"), 0)):
@@ -418,6 +448,8 @@ def _with_bridges(
     bridge_m: float,
     cost_factor: float,
     tolerance_m: float,
+    *,
+    settled: set[str] | None = None,
 ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
     """Join every loose end to whatever lies close beside it.
 
@@ -439,6 +471,7 @@ def _with_bridges(
         bridge_m: How far a loose end may reach
         cost_factor: Cost factor on the connectors added
         tolerance_m: Distance below which two positions are the same point
+        settled: Sources no bridge may land on
 
     Returns:
         The edges with the connectors added and the split edges replaced, and
@@ -451,7 +484,7 @@ def _with_bridges(
     if not len(loose):
         return edges, nodes
 
-    nearest = _nearest_edges(edges, nodes, loose, bridge_m)
+    nearest = _nearest_edges(edges, nodes, loose, bridge_m, settled)
     if not nearest:
         return edges, nodes
 

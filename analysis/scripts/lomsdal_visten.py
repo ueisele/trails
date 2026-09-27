@@ -198,6 +198,9 @@ class Park:
     #: Complete cached Marktäcke deliveries, so an offline build cannot
     #: silently lose the water of a missing municipality.
     water_municipalities: tuple[str, ...] = ()
+    #: Paddle the line 15 m off the bank (``kayak-offset-phases.md``). Off until the
+    #: map's full build and review in phase 12g turn it on, map by map.
+    paddle_offset: bool = False
 
     @property
     def kind_label(self) -> str:
@@ -3165,7 +3168,7 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         args.ut_routes = str(repo_root / "analysis" / "routes" / which.ut_routes) if which.ut_routes else ""
 
     park, boundary_records = load_park_boundary(which, args.cache_dir)
-    params = norway.Params.from_args(args)
+    params = norway.Params.from_args(args, paddle_offset=args.paddle_offset or which.paddle_offset)
     # Park and approach zone as one polygon. Nothing here is split at the
     # boundary; where a layer is, it is decided per chain further down.
     zone = norway.zone_around(park, params.approach_km)
@@ -3755,7 +3758,12 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     # `approach_km` shapes the Norwegian band and nothing here; left in the
     # key it forced a full rebuild, height pass and all, of an identical graph
     # whenever the docstring's own `--approach-km 5` was typed (§8.2).
-    params = dataclasses.replace(sweden.Params.from_args(args), approach_km=0.0, water_municipalities=which.water_municipalities)
+    params = dataclasses.replace(
+        sweden.Params.from_args(args),
+        approach_km=0.0,
+        water_municipalities=which.water_municipalities,
+        paddle_offset=args.paddle_offset or which.paddle_offset,
+    )
     # **The box, not a band round the park.** The tiles were copied for it and
     # the height mosaic was read over it, and the mosaic's cache is named by
     # the bounds it was read over, so the graph is cut to exactly the box or
@@ -4561,6 +4569,11 @@ def main() -> int:
     parser.add_argument("--simplify-m", type=float, default=8.0, help="Vertex tolerance for map rendering in metres; GPX keeps full detail")
     parser.add_argument("--hut-name-m", type=float, default=50.0, help="How far a cabin may look for its name in a point register (m)")
     parser.add_argument("--force-download", action="store_true", help="Re-download source data instead of using the cache")
+    parser.add_argument(
+        "--paddle-offset",
+        action="store_true",
+        help="Paddle the line 15 m off the bank on this build, whatever the park's own setting (kayak-offset-phases.md)",
+    )
     args = parser.parse_args()
 
     which = PARKS[args.park]

@@ -1,8 +1,9 @@
 """The line off the bank: validated offset contours of the eligible water, and the middle where they cannot go.
 
 Uwe's decision of 2026-09-25 moves the bank-following kayak line 15 m out into
-the water. This module draws that line and proves it; nothing in the build uses
-it yet. It offsets each connected eligible body whole, before any map cut, so a
+the water. This module draws that line and proves it;
+:mod:`trails.network.paddle_network` wires it into a build behind the
+``paddle_offset`` setting. It offsets each connected eligible body whole, before any map cut, so a
 lake/river interface, a delivery seam or the map edge is never a bank. Bodies
 never touch one another, so offsetting them one at a time is the offset of the
 whole union, and it bounds the memory by the largest body.
@@ -66,6 +67,8 @@ from trails.network.water import (
     DAM_CUT_M,
     LAKE_BODY,
     LAKE_LEVEL,
+    LANDING_WATER,
+    NARROW_WATER,
     OPEN_WATER,
     SHORE,
     SHORE_SIMPLIFY_M,
@@ -110,8 +113,6 @@ DRY_NOISE_M = 1e-6
 #: Refinement gives back at most one raw vertex per failing segment and round.
 MAX_REFINE_ROUNDS = 64
 
-#: The plan's source for the centre line and its transitions (§1.5), paddled at factor 1.
-NARROW_WATER = "Narrow water"
 #: The approved middle gate: at most this far from the true middle, and at most this share of the local width.
 MIDDLE_LIMIT_M = 1.0
 MIDDLE_SHARE = 0.1
@@ -223,6 +224,8 @@ class Contours:
         anchors: The access anchors pruning read, one row per anchor in closed-off
             water: ``anchor`` (index into the anchors given), ``body``, ``closed``
             (its piece), ``node_m`` (distance to its centre node), ``kept`` and the node
+        regions: The unsimplified offset of each body with any, cut to the extent: the water
+            at least d from its bank, which the contour encloses and open-water chords cross
     """
 
     lines: gpd.GeoDataFrame
@@ -234,6 +237,7 @@ class Contours:
     nodes: gpd.GeoDataFrame
     pruned: gpd.GeoDataFrame
     anchors: gpd.GeoDataFrame
+    regions: gpd.GeoDataFrame | None = None
     crs: Any = field(default=None)
 
 
@@ -258,6 +262,7 @@ class _Rows:
     nodes: list[dict[str, Any]] = field(default_factory=list)
     pruned: list[dict[str, Any]] = field(default_factory=list)
     anchors: list[dict[str, Any]] = field(default_factory=list)
+    regions: list[dict[str, Any]] = field(default_factory=list)
 
 
 LINE_COLUMNS = [
@@ -329,6 +334,7 @@ def contours(
     tolerance_m: float = CONTOUR_SIMPLIFY_M,
     sample_m: float = CENTRE_SAMPLE_M,
     tile_m: float = TILE_M,
+    prove_deviation: bool = True,
 ) -> Contours:
     """Offset every eligible body, run the middle where the offset cannot go, cut, simplify and validate both.
 
@@ -347,6 +353,9 @@ def contours(
         tolerance_m: Starting simplification tolerance
         sample_m: Starting bank sampling step of the medial construction
         tile_m: Side of the medial construction's tiles
+        prove_deviation: Take the contour's deviation bound from Douglas–Peucker and the
+            grid's move wherever the simplifier alone chose a segment, and sample only the
+            rest; False samples every segment, as the evidence that the proof holds
 
     Returns:
         The contours, the centre lines and their checks
@@ -381,6 +390,7 @@ def contours(
             to_page=to_page,
             from_page=from_page,
             rows=rows,
+            prove_deviation=prove_deviation,
         )
         summary["parents"] = sorted({int(p) for p in bodies.parents[members]})
         summaries.append(summary)
@@ -407,6 +417,7 @@ def contours(
         nodes=frame(rows.nodes, ["body", "kind", "degree", "radius_m", "middle_m", "geometry"]),
         pruned=frame(rows.pruned, ["body", "category", "longest_m", "total_m", "geometry"]),
         anchors=frame(rows.anchors, ["anchor", "body", "closed", "node_m", "kept", "geometry"]),
+        regions=frame(rows.regions, ["body", "geometry"]),
         crs=crs,
     )
 
@@ -429,6 +440,7 @@ def _body(
     to_page: Transformer,
     from_page: Transformer,
     rows: _Rows,
+    prove_deviation: bool = True,
 ) -> dict[str, Any]:
     """One connected body: offset, centre lines, cut, simplify, validate; rows are appended to ``rows``."""
     started = time.perf_counter()
@@ -447,6 +459,9 @@ def _body(
         )
     parts = [p for p in found if p.area >= RESIDUE_MIN_M2]
     summary["parts"] = len(parts)
+    if parts:
+        region = shapely.multipolygons(parts)
+        rows.regions.append({"body": body, "geometry": shapely.intersection(region, extent) if extent is not None else region})
     bank = _segments(water)
     bank_tree = shapely.STRtree(bank.lines)
     owners = _owners(polygons, owner)
@@ -551,7 +566,10 @@ def _body(
                     row = rows.caps[first_cap + int(tree.nearest(LineString(piece.coords)))]
                     row["mouths"] += 1
                     row["cap_m"] = round(row["cap_m"] + LineString(piece.coords).length, 3)
-        validated = [_validated(piece, bank, bank_tree, tolerance_m=tolerance_m, to_page=to_page, from_page=from_page) for piece in pieces]
+        validated = [
+            _validated(piece, bank, bank_tree, tolerance_m=tolerance_m, to_page=to_page, from_page=from_page, prove=prove_deviation)
+            for piece in pieces
+        ]
         raw_lines = [LineString(piece.coords) for piece in pieces]
         # Crossings and contacts come from one pass; it is repeated only after a piece changed.
         crossings, contacts = _crossings([line for _, line in validated], raw_lines)
@@ -574,7 +592,9 @@ def _body(
             if not touched:
                 break
             for index in touched:
-                validated[index] = _validated(pieces[index], bank, bank_tree, tolerance_m=tolerance_m, to_page=to_page, from_page=from_page)
+                validated[index] = _validated(
+                    pieces[index], bank, bank_tree, tolerance_m=tolerance_m, to_page=to_page, from_page=from_page, prove=prove_deviation
+                )
             crossings, contacts = _crossings([line for _, line in validated], raw_lines)
         for _, _, where in crossings:
             failures.append({"body": body, "kind": "crossing", "detail": "simplified pieces cross where the raw contour does not", "geometry": where})
@@ -1168,8 +1188,20 @@ def _validated(
     tolerance_m: float,
     to_page: Transformer,
     from_page: Transformer,
+    prove: bool = True,
 ) -> tuple[dict[str, Any], LineString]:
-    """Simplify one piece, then give back raw vertices until its decoded form passes both gates."""
+    """Simplify one piece, then give back raw vertices until its decoded form passes both gates.
+
+    The deviation gate is proved rather than sampled on every segment Douglas–Peucker chose
+    alone (``prove``): each raw vertex it dropped lies within the tolerance of the kept
+    segment spanning it, so every raw point between the segment's ends does (distance to a
+    segment is convex), and every point p of the segment lies within the tolerance of the raw
+    run too: the run joins the segment's two ends, so it crosses the perpendicular through p,
+    and it crosses it at most the tolerance from the segment, which on that perpendicular is
+    the distance from p. The page's grid moves each end by a measured amount and a segment
+    by no more than the larger. The bound is that largest dropped distance, at most the tolerance,
+    plus the move. Segments a pinned or given-back vertex split are sampled.
+    """
     raw = piece.coords
     raw_line = LineString(raw)
     raw_segments = _edges(raw)
@@ -1177,6 +1209,7 @@ def _validated(
     (_, _), raw_gaps = bank_tree.query_nearest(raw_segments, return_distance=True, all_matches=False)
     keep = simplify_pinned(raw, tolerance_m)
     initial = len(keep)
+    simplified = keep
     if len(piece.pinned):
         keep = np.union1d(keep, piece.pinned)
     for _ in range(MAX_REFINE_ROUNDS):
@@ -1186,8 +1219,12 @@ def _validated(
         # A decoded segment follows the raw segments between its two kept vertices; a raw segment's
         # bound belongs to the simplified segment spanning it.
         span = np.searchsorted(keep, np.arange(len(raw) - 1), side="right") - 1
-        forward, forward_at = _deviation_bound(coords, raw_index, keep[:-1], keep[1:] - 1)
-        backward, backward_at = _deviation_bound(raw, _SegmentIndex.of(coords), span, span)
+        proven = _simplifier_segments(keep, simplified) if prove else np.zeros(len(keep) - 1, dtype=bool)
+        gate = np.where(proven, np.inf, CONTOUR_DEVIATION_M)
+        forward, forward_at = _deviation_bound(coords, raw_index, keep[:-1], keep[1:] - 1, gate)
+        backward, backward_at = _deviation_bound(raw, _SegmentIndex.of(coords), span, span, gate[span])
+        moved = np.hypot(*(coords - raw[keep]).T)
+        forward[proven] = (_dropped(raw, keep) + np.maximum(moved[:-1], moved[1:]))[proven]
         backward_by_segment = np.zeros(len(keep) - 1)
         np.maximum.at(backward_by_segment, span, backward)
         failing = (clearance < CONTOUR_CLEARANCE_M) | (forward > CONTOUR_DEVIATION_M) | (backward_by_segment > CONTOUR_DEVIATION_M)
@@ -1230,6 +1267,23 @@ def _validated(
         "geometry": decoded_line,
     }
     return row, decoded_line
+
+
+def _dropped(raw: np.ndarray, keep: np.ndarray) -> np.ndarray:
+    """Per kept segment, the largest distance of a raw vertex it dropped from it; 0 where it dropped none."""
+    inner = np.setdiff1d(np.arange(len(raw)), keep)
+    out = np.zeros(len(keep) - 1)
+    if len(inner):
+        segment = np.searchsorted(keep, inner, side="right") - 1
+        np.maximum.at(out, segment, _distance_pairs(raw[inner], raw[keep[segment]], raw[keep[segment + 1]]))
+    return out
+
+
+def _simplifier_segments(keep: np.ndarray, simplified: np.ndarray) -> np.ndarray:
+    """Which segments of ``keep`` join two vertices consecutive in the simplifier's own choice ``simplified``."""
+    position = np.searchsorted(simplified, keep)
+    found = (position < len(simplified)) & (simplified[np.minimum(position, len(simplified) - 1)] == keep)
+    return np.asarray(found[:-1] & found[1:] & (position[1:] == position[:-1] + 1), dtype=bool)
 
 
 def _deviation_bound(
@@ -3364,8 +3418,6 @@ def _off_dams(
     return out
 
 
-#: The plan's source for paddled access between a retained bank anchor and the line (§1.5), factor 1.
-LANDING_WATER = "Landing water"
 #: Phase 9's bank is the water's outline simplified at 5 m, so an anchor on it lies at most that
 #: far off the water; a spur's run from its anchor up to the water stays within that band.
 BANK_STEP_M = SHORE_SIMPLIFY_M + 0.1
@@ -3432,7 +3484,7 @@ SPUR_COLUMNS = [
 class Landings:
     """How every retained contact reaches the line, the stream mouths, and the lake-owned interfaces.
 
-    Nothing here is wired into a graph: 12e nodes these lines into the network.
+    :mod:`trails.network.paddle_network` nodes these lines into the network (12e).
 
     Attributes:
         spurs: One row per contact: ``contact`` (its row in the contacts given), ``roles``, ``body``,

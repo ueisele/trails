@@ -747,3 +747,75 @@ def test_direction_refuses_a_missing_or_non_boolean_value(value) -> None:
     edge_frame["one_way"] = value
     with pytest.raises(ValueError, match="one_way"):
         encoded(chains((line, "a")), edge_frame)
+
+
+def test_the_page_decodes_each_paddled_role_and_the_bank_anchors_of_the_line_off_the_bank() -> None:
+    """The page's own decoder, in Node, over a payload carrying every role of the line off the bank."""
+    import json
+    import shutil
+    import subprocess
+    from importlib.resources import files
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is needed to run the page's decoder")
+    at = [(13.0 + 0.001 * i, 65.6) for i in range(7)]
+    parts = [
+        ("Shore", "s", 0, 1),
+        # A spur from its bank anchor (node 2) to the contour, and the path that reaches the anchor.
+        ("Landing water", "l", 2, 0),
+        ("FKB", "p", 6, 2),
+        ("Open water", "o", 1, 3),
+        ("Narrow water", "n", 3, 4),
+        ("Streams", "r", 4, 5),
+    ]
+    lines = [LineString([at[one], at[other]]) for _, _, one, other in parts]
+    edges = graph(*((line, chain, one, other, name, [1.0, 1.0]) for line, (name, chain, one, other) in zip(lines, parts, strict=True)))
+    edges["kind"] = ["path" if name == "FKB" else "paddle" for name, _, _, _ in parts]
+    roles = {"Shore": "travel", "Narrow water": "travel", "Landing water": "landing", "Open water": "open", "Streams": "stream"}
+    costs = {**COSTS, **{name: {"factor": 1.5 if name == "Open water" else 1.0, "role": role} for name, role in roles.items()}}
+    frame = chains(*((line, chain) for line, (_, chain, _, _) in zip(lines, parts, strict=True)))
+    payload = encode_graph(frame, edges, chain_order(frame, edges), costs=costs, areas=AREAS)
+    assert {row["name"]: row.get("role") for row in payload.header["sources"]} == {**roles, "FKB": None}
+
+    source = files("trails.visualization").joinpath("js", "routing_graph.js").read_text()
+    source = source.replace("{{ this.header_json }}", json.dumps(payload.header)).replace("{{ this.data_json }}", json.dumps(payload.data))
+    script = (
+        "globalThis.window = globalThis;\n"
+        + source
+        + "\nwindow.trailsGraph.ready.then(g => console.log(JSON.stringify({roles: Array.from(g.sources, s => g.roleOf[s]),"
+        + " names: Array.from(g.sources, s => g.header.sources[s].name), from: Array.from(g.fromNode), to: Array.from(g.toNode),"
+        + " anchor: Array.from(g.bankAnchor)})));"
+    )
+    result = subprocess.run([node, "-"], input=script, text=True, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    read = json.loads(result.stdout)
+    assert dict(zip(read["names"], read["roles"], strict=True)) == {**roles, "FKB": None}
+    # Node 2 is reached by Landing water and a path only: the bank anchor, and the only one.
+    anchor_edge = read["names"].index("Landing water")
+    anchor = next(n for n in (read["from"][anchor_edge], read["to"][anchor_edge]) if read["anchor"][n])
+    assert sum(read["anchor"]) == 1
+    path_edge = read["names"].index("FKB")
+    assert anchor in (read["from"][path_edge], read["to"][path_edge])
+
+
+def test_a_graph_whose_paddled_line_follows_the_bank_carries_no_role_and_a_half_labelled_one_is_refused() -> None:
+    line = LineString([(13.0, 65.6), (13.001, 65.6)])
+    other = LineString([(13.001, 65.6), (13.002, 65.6)])
+    edges = graph((line, "a", 0, 1, "FKB", [1.0, 1.0]), (other, "b", 1, 2, "FKB", [1.0, 1.0]))
+    edges["source"] = ["Shore", "Open water"]
+    edges["kind"] = "paddle"
+    frame = chains((line, "a"), (other, "b"))
+    plain = {"Shore": {"factor": 1.0}, "Open water": {"factor": 1.5}}
+    payload = encode_graph(frame, edges, chain_order(frame, edges), costs=plain, areas=AREAS)
+    assert all("role" not in row for row in payload.header["sources"])
+    with pytest.raises(ValueError, match="every paddled source carries a role or none"):
+        encode_graph(frame, edges, chain_order(frame, edges), costs={**plain, "Shore": {"factor": 1.0, "role": "travel"}}, areas=AREAS)
+    with pytest.raises(ValueError, match="role the page does not know"):
+        encode_graph(
+            frame,
+            edges,
+            chain_order(frame, edges),
+            costs={"Shore": {"factor": 1.0, "role": "bank"}, "Open water": {"factor": 1.5, "role": "open"}},
+            areas=AREAS,
+        )

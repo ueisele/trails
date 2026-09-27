@@ -412,6 +412,35 @@ def readings():
         g.water=null; g.oneWay=[1,1];
         const beside={node:-1,lon:0.01,lat:0.00008},beyond={node:-1,lon:0.02008,lat:0.01};
         out.meetingEdges={chosen:joinedRoute(g,beside,beyond),expected:referenceJoined(g,beside,beyond)};
+        // The line off the bank: each role is paddled at its own source's price, in
+        // whole and in part, credited to its own name, and on foot neither routed
+        // nor snapped to in either setting.
+        const offsetSources=[{name:'Shore',kind:'paddle',factor:1,role:'travel'},
+            {name:'Narrow water',kind:'paddle',factor:1,role:'travel'},
+            {name:'Landing water',kind:'paddle',factor:1,role:'landing'},
+            {name:'Open water',kind:'paddle',factor:1.5,role:'open'},
+            {name:'Streams',kind:'paddle',factor:1,role:'stream'}];
+        out.offsetRoles=[];
+        for(let s=0;s<offsetSources.length;s++) {
+            paddle(true); stayOnPaths(false);
+            g=alternatives(offsetSources,[[0,1,s]],[[0,0],[0.001,0]]);
+            g.water=null; g.oneWay=[offsetSources[s].role==='stream'?1:0]; g.nearestNode=()=>0;
+            g.header.protected=[]; g.protectedAt=[0,0]; g.protectedArea=[]; g.protectedShare=[];
+            g.header.waymarked=[null]; g.waymarked=[0];
+            const length=router(g).length[0];
+            const row={name:offsetSources[s].name,factor:offsetSources[s].factor,length,
+                whole:routeBetween(g,at(0),at(1)),back:routeBetween(g,at(1),at(0)),
+                part:routeBetween(g,{node:-1,edge:0,along:length/4,lon:0.00025,lat:0},{node:-1,edge:0,along:3*length/4,lon:0.00075,lat:0})};
+            const tally=blankTally(); tallyEdge(tally,g,0,length); row.tally=tally;
+            row.walking=[];
+            for(const staying of [false,true]) {
+                paddle(false); stayOnPaths(staying); routing=null;
+                row.walking.push({reachable:Number.isFinite(router(g).cost[0]),route:routeBetween(g,at(0),at(1)),
+                    line:nearestOnNetwork(g,0,0.0001,1),tap:snapped(g,0,0,1)});
+            }
+            out.offsetRoles.push(row);
+        }
+        paddle(true); stayOnPaths(false);
         console.log(JSON.stringify(out));
     """
     )
@@ -758,3 +787,26 @@ def test_kloten_interior_entries_match_the_virtual_table_and_attached_rows_stay_
         # The analytic construction and the earlier refined virtual point
         # differ by at most 0.000029 m across the 24 measured off-network rows.
         assert row["carry"] == pytest.approx(row["expected"]["carry"], abs=0.000029, rel=1e-12), row["case"]
+
+
+def test_every_source_of_the_line_off_the_bank_is_paddled_at_its_price_and_credited_to_its_name(readings):
+    rows = {row["name"]: row for row in readings["offsetRoles"]}
+    assert set(rows) == {"Shore", "Narrow water", "Landing water", "Open water", "Streams"}
+    for name, row in rows.items():
+        assert row["whole"]["cost"] == pytest.approx(row["length"] * row["factor"])
+        assert row["whole"]["land"] == 0
+        # A partial edge pays for the part it runs along, entered and left between the nodes.
+        assert row["part"]["cost"] == pytest.approx(row["length"] * row["factor"] / 2)
+        assert row["tally"]["sources"] == {name: pytest.approx(row["length"])}
+        # Only the stream keeps its digitised direction.
+        assert (row["back"] is None) is (name == "Streams")
+
+
+def test_walking_neither_routes_nor_snaps_to_any_source_of_the_line_off_the_bank(readings):
+    for row in readings["offsetRoles"]:
+        for walk in row["walking"]:
+            assert walk["reachable"] is False
+            assert walk["route"] is None
+            assert walk["line"] is None
+            assert walk["tap"]["node"] == -1
+            assert "edge" not in walk["tap"]
