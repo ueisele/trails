@@ -206,7 +206,7 @@ class Loaded(NamedTuple):
 
     Attributes:
         sources: The datasets the network is built from
-        access: Water and dams used to check launch ties
+        access: Water and dams used to check launch ties, and the bank carries and launches measure to
         municipalities: The codes they were ordered per, which the caller needs
             for anything else it draws from the same per-municipality datasets
         versions: What each source was read at, by name: the version where the
@@ -465,11 +465,10 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
     # The full cached layer retains the lake levels that load_water omits.
     cover = n50_source.load_layers(codes, (n50.LAND_COVER_LAYER,), force_download=download)
     surfaces = cover[cover["objtype"].isin(n50.WATER_COVER_TYPES) & cover.intersects(box(*zone.total_bounds))]
-    sources.extend(
-        water.sources(
-            surfaces, metric_crs=METRIC_CRS, class_field="objtype", lake_classes=("Innsjø", "InnsjøRegulert"), level_field="hoyde", extent=zone
-        )
+    paddled = water.paddle(
+        surfaces, metric_crs=METRIC_CRS, class_field="objtype", lake_classes=("Innsjø", "InnsjøRegulert"), level_field="hoyde", extent=zone
     )
+    sources.extend(paddled.sources)
 
     # One order covers all three N50 layers, so all three carry its date. The
     # height model is not here: it is read per point rather than ordered, and
@@ -491,7 +490,7 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
     # same extent and cannot answer differently.
     print("\nLoading protected areas (Naturbase)...")
     protected = load_protected(params, zone)
-    return Loaded(sources=sources, municipalities=codes, versions=versions, protected=protected, access=water.Access(surfaces))
+    return Loaded(sources=sources, municipalities=codes, versions=versions, protected=protected, access=water.Access(surfaces, bank=paddled.bank))
 
 
 def edge_costs(sources: list[NetworkSource], params: Params) -> dict[str, dict[str, float]]:
@@ -587,7 +586,7 @@ def build(
 
     Args:
         sources: The datasets
-        access: Water and dams used to check launch ties
+        access: Water and dams used to check launch ties, and the bank carries and launches measure to
         masks: What the derived edge fields are decided against
         clip: Extent to cut them to
         params: What decides the build

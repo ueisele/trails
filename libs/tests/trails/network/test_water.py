@@ -1,5 +1,7 @@
 """Water geometry, dam gaps and the walking choices at a portage."""
 
+from dataclasses import replace
+
 import geopandas as gpd
 import numpy as np
 import pandas as pd
@@ -17,12 +19,12 @@ CRS = "EPSG:3006"
 def test_surface_dam_cuts_leave_a_portage_and_never_create_a_bank():
     polygon = box(-300, -10, 300, 10)
     dams = gpd.GeoDataFrame(geometry=[Point(0, 0)], crs=CRS)
-    paddle = water.sources(gpd.GeoDataFrame(geometry=[polygon], crs=CRS), metric_crs=CRS, dams=dams)
+    paddle, bank = water.paddle(gpd.GeoDataFrame(geometry=[polygon], crs=CRS), metric_crs=CRS, dams=dams)
     for source in paddle:
         assert (source.gdf.distance(dams.geometry.iloc[0]) >= water.DAM_CUT_M - 1e-9).all()
     assert paddle[0].gdf.covered_by(polygon.boundary).all()
     walking = build_network([NetworkSource("path", gpd.GeoDataFrame(geometry=[], crs=CRS))], metric_crs=CRS)
-    carries, _ = water.portages(paddle, walking)
+    carries, _ = water.portages(bank, walking)
     assert len(carries.gdf) == 1
     assert carries.kind == PORTAGE
     assert carries.gdf.geometry.iloc[0].distance(dams.geometry.iloc[0]) < water.DAM_CUT_M
@@ -90,11 +92,11 @@ def test_a_stream_returning_to_a_dam_cannot_reenter_its_disc():
 
 def test_portages_join_components_once_and_tie_their_feet_to_path_nodes():
     surfaces = gpd.GeoDataFrame(geometry=[box(0, 0, 100, 100), box(200, 0, 300, 100)], crs=CRS)
-    paddle = water.sources(surfaces, metric_crs=CRS)
+    paddle, bank = water.paddle(surfaces, metric_crs=CRS)
     walking = build_network(
         [NetworkSource("path", gpd.GeoDataFrame(geometry=[LineString([(100, -50), (200, -50)])], crs=CRS))], metric_crs=CRS, bridge_m=0
     )
-    chords, ties = water.portages(paddle, walking)
+    chords, ties = water.portages(bank, walking)
     assert len(chords.gdf) == 1
     assert chords.gdf.length.iloc[0] == pytest.approx(100)
     assert len(ties.gdf) == 2
@@ -109,18 +111,17 @@ def test_portages_join_components_once_and_tie_their_feet_to_path_nodes():
 
 def test_no_chord_reaches_beyond_the_portage_distance():
     surfaces = gpd.GeoDataFrame(geometry=[box(0, 0, 100, 100), box(1200, 0, 1300, 100)], crs=CRS)
-    paddle = water.sources(surfaces, metric_crs=CRS)
     walking = build_network([NetworkSource("path", gpd.GeoDataFrame(geometry=[], crs=CRS))], metric_crs=CRS)
-    assert all(source.gdf.empty for source in water.portages(paddle, walking))
+    assert all(source.gdf.empty for source in water.portages(water.paddle(surfaces, metric_crs=CRS).bank, walking))
 
 
 def test_a_dam_gap_is_a_portage_and_streams_declare_their_direction():
     streams = gpd.GeoDataFrame({"storleksklass": ["2"]}, geometry=[LineString([(100, 0), (0, 0)])], crs=CRS)
     dams = gpd.GeoDataFrame(geometry=[Point(50, 0)], crs=CRS)
-    paddle = water.sources(gpd.GeoDataFrame(geometry=[], crs=CRS), metric_crs=CRS, streams=streams, dams=dams)
+    paddle, bank = water.paddle(gpd.GeoDataFrame(geometry=[], crs=CRS), metric_crs=CRS, streams=streams, dams=dams)
     assert paddle[-1].directed
     walking = build_network([NetworkSource("path", gpd.GeoDataFrame(geometry=[], crs=CRS))], metric_crs=CRS)
-    chord, ties = water.portages(paddle, walking)
+    chord, ties = water.portages(bank, walking)
     assert len(chord.gdf) == 1 and chord.gdf.length.iloc[0] == pytest.approx(50)
     assert ties.gdf.empty
     assert shapely.union_all(paddle[-1].gdf.geometry).length == pytest.approx(50)
@@ -131,7 +132,8 @@ def test_the_combined_build_reports_water_and_leaves_the_input_cache_alone(tmp_p
 
     surfaces = gpd.GeoDataFrame(geometry=[box(0, 0, 100, 100), box(200, 0, 300, 100)], crs=CRS)
     items = [NetworkSource("path", gpd.GeoDataFrame(geometry=[LineString([(100, -50), (200, -50)])], crs=CRS))]
-    items.extend(water.sources(surfaces, metric_crs=CRS))
+    paddled = water.paddle(surfaces, metric_crs=CRS)
+    items.extend(paddled.sources)
     empty = gpd.GeoSeries([], crs=CRS)
     masks = graphs.Masks(empty, empty, empty)
     protected = gpd.GeoDataFrame({"id": [], "name": [], "form": []}, geometry=[], crs=CRS)
@@ -144,11 +146,66 @@ def test_the_combined_build_reports_water_and_leaves_the_input_cache_alone(tmp_p
         rules,
         protected=protected,
         measure=lambda network: with_elevation(network, lambda coordinates: coordinates[:, 0]),
+        access=water.Access(surfaces, bank=paddled.bank),
     )
     assert not (tmp_path / "inputs").exists()
     assert not network.edges["one_way"].any()
     assert {water.SHORE, water.OPEN_WATER, water.PORTAGES} <= set(counts["source"])
     assert "Portages:" in capsys.readouterr().out
+
+
+def _land_access(items: list[NetworkSource], access: water.Access | None, tmp_path) -> dict[str, gpd.GeoDataFrame]:
+    """Build a small combined network and return the portages and launches it inferred."""
+    from trails.network import graphs
+
+    empty = gpd.GeoSeries([], crs=CRS)
+    protected = gpd.GeoDataFrame({"id": [], "name": [], "form": []}, geometry=[], crs=CRS)
+    water.build(
+        items,
+        graphs.Masks(empty, empty, empty),
+        gpd.GeoDataFrame(geometry=[box(-100, -200, 400, 200)], crs=CRS),
+        graphs.Params(cache_dir=str(tmp_path / "inputs")),
+        graphs.Rules(metric_crs=CRS, layout="test", protected_id="id", protected_name="name", protected_form="form", form_label=str),
+        protected=protected,
+        measure=lambda network: with_elevation(network, lambda coordinates: coordinates[:, 0]),
+        access=access,
+    )
+    return {source.name: source.gdf for source in items if source.name in (water.PORTAGES, water.PORTAGE_PATHS, water.LAUNCHES)}
+
+
+def test_the_bank_is_the_paddled_lines_of_today():
+    surfaces = gpd.GeoDataFrame(geometry=[box(0, 0, 100, 100), box(200, 0, 300, 100)], crs=CRS)
+    streams = gpd.GeoDataFrame({"storleksklass": ["2"]}, geometry=[LineString([(100, 50), (200, 50)])], crs=CRS)
+    paddled = water.paddle(surfaces, metric_crs=CRS, streams=streams, dams=gpd.GeoDataFrame(geometry=[], crs=CRS))
+    assert [name for name, _ in paddled.bank.pieces()] == [source.name for source in paddled.sources]
+    assert all(frame is source.gdf for (_, frame), source in zip(paddled.bank.pieces(), paddled.sources, strict=True))
+    again = water.sources(surfaces, metric_crs=CRS, streams=streams, dams=gpd.GeoDataFrame(geometry=[], crs=CRS))
+    assert all(one.gdf.geometry.equals(other.gdf.geometry) for one, other in zip(again, paddled.sources, strict=True))
+
+
+def test_carries_and_launches_stay_on_the_bank_when_the_paddled_line_leaves_it(tmp_path):
+    surfaces = gpd.GeoDataFrame(geometry=[box(0, 0, 100, 100), box(200, 0, 300, 100)], crs=CRS)
+    walking = [
+        NetworkSource("path", gpd.GeoDataFrame(geometry=[LineString([(100, -50), (200, -50)])], crs=CRS)),
+        # A road end 25 m from the bank: phase 10's 30 m reach is measured to the bank, not to a line 15 m farther out.
+        NetworkSource("road", gpd.GeoDataFrame(geometry=[LineString([(50, -100), (50, -25)])], crs=CRS)),
+    ]
+    paddled = water.paddle(surfaces, metric_crs=CRS)
+    access = water.Access(surfaces, bank=paddled.bank)
+    on_bank = _land_access([*walking, *paddled.sources], access, tmp_path)
+    offshore = [
+        replace(source, gdf=source.gdf.assign(geometry=[box(15, 15, 85, 85).boundary, box(215, 15, 285, 85).boundary]))
+        if source.name == water.SHORE
+        else replace(source, gdf=source.gdf.iloc[:0])
+        for source in paddled.sources
+    ]
+    moved = _land_access([*walking, *offshore], access, tmp_path)
+    assert len(on_bank[water.LAUNCHES]) == 1 and on_bank[water.LAUNCHES].length.iloc[0] == pytest.approx(25)
+    assert len(on_bank[water.PORTAGES]) == 1 and on_bank[water.PORTAGES].length.iloc[0] == pytest.approx(100)
+    for name, frame in on_bank.items():
+        assert frame.geometry.geom_equals_exact(moved[name].geometry, 0).all() and len(frame) == len(moved[name])
+    with pytest.raises(ValueError, match="needs the bank"):
+        _land_access([*walking, *paddled.sources], None, tmp_path)
 
 
 def test_touching_lakes_share_the_lowest_register_without_trusting_ids():
@@ -295,14 +352,13 @@ def test_a_stream_needs_read_heights_before_its_direction_can_open(values):
 
 def test_portages_only_join_delaunay_neighbours_and_never_cross_a_third_lake():
     surfaces = gpd.GeoDataFrame(geometry=[box(0, 0, 100, 100), box(500, 0, 600, 100), box(250, -100, 350, 1000)], crs=CRS)
-    paddle = water.sources(surfaces, metric_crs=CRS)
     walking = build_network([NetworkSource("path", gpd.GeoDataFrame(geometry=[], crs=CRS))], metric_crs=CRS)
-    chords, _ = water.portages(paddle, walking)
+    chords, _ = water.portages(water.paddle(surfaces, metric_crs=CRS).bank, walking)
     assert not chords.gdf.empty
     for chord in chords.gdf.geometry:
         assert sum(chord.intersects(surface) for surface in surfaces.geometry) == 2
     collinear = gpd.GeoDataFrame(geometry=[box(x, 0, x + 100, 100) for x in (0, 200, 400, 600)], crs=CRS)
-    chords, _ = water.portages(water.sources(collinear, metric_crs=CRS), walking)
+    chords, _ = water.portages(water.paddle(collinear, metric_crs=CRS).bank, walking)
     assert len(chords.gdf) == len(collinear) - 1
     assert not any(one.crosses(other) for one in chords.gdf.geometry for other in chords.gdf.geometry)
 
@@ -310,27 +366,26 @@ def test_portages_only_join_delaunay_neighbours_and_never_cross_a_third_lake():
 def test_one_water_piece_needs_no_portages():
     surfaces = gpd.GeoDataFrame(geometry=[box(0, 0, 100, 100)], crs=CRS)
     walking = build_network([NetworkSource("path", gpd.GeoDataFrame(geometry=[], crs=CRS))], metric_crs=CRS)
-    assert all(source.gdf.empty for source in water.portages(water.sources(surfaces, metric_crs=CRS), walking))
+    assert all(source.gdf.empty for source in water.portages(water.paddle(surfaces, metric_crs=CRS).bank, walking))
 
 
 def test_a_closed_stream_does_not_turn_the_land_inside_it_into_water():
     surfaces = gpd.GeoDataFrame(geometry=[box(0, 0, 100, 100), box(200, 0, 300, 100)], crs=CRS)
-    paddle = water.sources(surfaces, metric_crs=CRS)
     stream = gpd.GeoDataFrame(geometry=[box(-200, -200, 800, 800).boundary], crs=CRS)
-    paddle.append(NetworkSource(water.STREAMS, stream, kind=PADDLE, directed=True))
+    bank = replace(water.paddle(surfaces, metric_crs=CRS).bank, streams=stream)
     walking = build_network([NetworkSource("path", gpd.GeoDataFrame(geometry=[], crs=CRS))], metric_crs=CRS)
-    chords, _ = water.portages(paddle, walking)
+    chords, _ = water.portages(bank, walking)
     assert any(all(chord.intersects(surface) for surface in surfaces.geometry) for chord in chords.gdf.geometry)
 
 
 def test_ponds_leave_no_paddle_lines_or_portages_but_do_not_change_the_input():
     surfaces = gpd.GeoDataFrame(geometry=[box(0, 0, 100, 99), box(200, 0, 300, 100)], crs=CRS)
     before = surfaces.copy()
-    paddle = water.sources(surfaces, metric_crs=CRS)
+    paddle, bank = water.paddle(surfaces, metric_crs=CRS)
     assert all(source.gdf.geometry.intersects(surfaces.geometry.iloc[1]).all() for source in paddle)
     assert not any(source.gdf.geometry.intersects(surfaces.geometry.iloc[0]).any() for source in paddle)
     walking = build_network([NetworkSource("path", gpd.GeoDataFrame(geometry=[], crs=CRS))], metric_crs=CRS)
-    assert all(source.gdf.empty for source in water.portages(paddle, walking))
+    assert all(source.gdf.empty for source in water.portages(bank, walking))
     assert surfaces.equals(before)
 
 
@@ -339,13 +394,13 @@ def test_launches_split_a_passing_path_and_keep_dead_ends_first():
     from trails.routing.sources import LAUNCH
 
     surface = gpd.GeoDataFrame(geometry=[box(0, 0, 1000, 200)], crs=CRS)
-    paddle = water.sources(surface, metric_crs=CRS)
+    paddle, bank = water.paddle(surface, metric_crs=CRS)
     paths = NetworkSource(
         "roads",
         gpd.GeoDataFrame(geometry=[LineString([(100, -100), (100, -20)]), LineString([(200, -100), (200, -10), (800, -10), (800, -100)])], crs=CRS),
     )
     walking = build_network([paths], bridge_m=0, metric_crs=CRS)
-    source = launches(paddle, walking, water.Access(surface))
+    source = launches(bank, walking, water.Access(surface))
     assert source.kind == LAUNCH and source.cost_factor == 1
     assert source.gdf["origin"].eq("dead end").any()
     assert source.gdf["origin"].eq("passing").any()
@@ -366,11 +421,11 @@ def test_launches_do_not_cross_water_or_a_dam_disc():
     from trails.network.launches import launches
 
     surface = gpd.GeoDataFrame(geometry=[box(0, 0, 1000, 200), box(190, -15, 210, -5)], crs=CRS)
-    paddle = water.sources(surface.iloc[:1], metric_crs=CRS)
+    bank = water.paddle(surface.iloc[:1], metric_crs=CRS).bank
     paths = NetworkSource("roads", gpd.GeoDataFrame(geometry=[LineString([(200, -100), (200, -20)]), LineString([(700, -100), (700, -20)])], crs=CRS))
     walking = build_network([paths], bridge_m=0, metric_crs=CRS)
     dams = gpd.GeoDataFrame(geometry=[Point(700, 0)], crs=CRS)
-    source = launches(paddle, walking, water.Access(surface, dams))
+    source = launches(bank, walking, water.Access(surface, dams))
     assert source.gdf.empty
 
 

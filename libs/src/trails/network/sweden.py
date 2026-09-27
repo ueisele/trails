@@ -188,7 +188,7 @@ class Loaded(NamedTuple):
 
     Attributes:
         sources: The datasets the network is built from
-        access: Water and dams used to check launch ties
+        access: Water and dams used to check launch ties, and the bank carries and launches measure to
         versions: What each source was read at, by name: the day the register's
             file was written, the day Lantmäteriet produced the delivery, the
             moment Overpass answered
@@ -436,18 +436,17 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
     surfaces = marktacke.Source(cache_dir=params.cache_dir).water(bounds, params.water_municipalities).to_crs("EPSG:4326")
     streams = clip_lines(country.streams(bounds, force_download=download), extent)
     dams = country.dams(bounds, force_download=download)
-    sources.extend(
-        water.sources(
-            surfaces,
-            metric_crs=METRIC_CRS,
-            class_field=topografi50.TYPE,
-            lake_classes=(topografi50.LAKE_CLASS,),
-            level_field=topografi50.WATER_LEVEL,
-            streams=streams,
-            dams=dams,
-            extent=zone,
-        )
+    paddled = water.paddle(
+        surfaces,
+        metric_crs=METRIC_CRS,
+        class_field=topografi50.TYPE,
+        lake_classes=(topografi50.LAKE_CLASS,),
+        level_field=topografi50.WATER_LEVEL,
+        streams=streams,
+        dams=dams,
+        extent=zone,
     )
+    sources.extend(paddled.sources)
 
     versions = {
         LEDER: register.versions.get(naturvardsregistret.TRAILS_FILE),
@@ -481,7 +480,7 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
         geometry="geometry",
         crs="EPSG:4326",
     )
-    return Loaded(sources=sources, versions=versions, protected=protected, winter=winter, access=water.Access(surfaces, dams))
+    return Loaded(sources=sources, versions=versions, protected=protected, winter=winter, access=water.Access(surfaces, dams, paddled.bank))
 
 
 def edge_costs(sources: list[NetworkSource], params: Params) -> dict[str, dict[str, float]]:
@@ -574,7 +573,7 @@ def build(
 
     Args:
         sources: The datasets
-        access: Water and dams used to check launch ties
+        access: Water and dams used to check launch ties, and the bank carries and launches measure to
         masks: What the derived edge fields are decided against
         clip: Extent to cut them to, in EPSG:4326; also what the height mosaic
             is read over

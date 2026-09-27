@@ -12,7 +12,7 @@ from trails.routing.noding import NODE_TOLERANCE_M
 from trails.routing.sources import LAUNCH, PATH, NetworkSource
 
 if TYPE_CHECKING:
-    from trails.network.water import Access
+    from trails.network.water import Access, Bank
 
 LAUNCHES = "Launches"
 LAUNCH_M = 30.0
@@ -20,7 +20,7 @@ LAUNCH_M = 30.0
 SHORE_SPACING_M = 100.0
 
 
-def launches(sources: list[NetworkSource], walking: Network, access: Access, *, spacing_m: float = SHORE_SPACING_M) -> NetworkSource:
+def launches(bank: Bank, walking: Network, access: Access, *, spacing_m: float = SHORE_SPACING_M) -> NetworkSource:
     """Join dead ends and nearby passing paths to the shore over land only.
 
     Dead ends have priority over passing paths. Passing candidates are ordered
@@ -28,7 +28,8 @@ def launches(sources: list[NetworkSource], walking: Network, access: Access, *, 
     landing survives. Spacing follows the shore, including around closed rings.
 
     Args:
-        sources: Walking and paddle sources, before inferred launch ties
+        bank: The bank the 30 m and the spacing are measured to and along:
+            the dissolved bank at phase 9's 5 m, whatever line is paddled
         walking: Noded walking network, in a metric CRS
         access: Unsimplified source water and dam points
         spacing_m: Minimum shore distance between a passing landing and prior access
@@ -36,25 +37,24 @@ def launches(sources: list[NetworkSource], walking: Network, access: Access, *, 
     Returns:
         Kayak-only lines with their origin recorded for the build measurements
     """
-    from trails.network.water import DAM_CUT_M, SHORE
+    from trails.network.water import DAM_CUT_M
 
     crs = walking.edges.crs
     if crs is None or not crs.is_projected:
         raise ValueError("launches need a projected walking network")
     if spacing_m <= 0:
         raise ValueError("launch spacing must be positive")
-    shore_arrays = [s.gdf.to_crs(crs).geometry.to_numpy() for s in sources if s.name == SHORE]
-    shore = np.concatenate(shore_arrays) if shore_arrays else np.empty(0, dtype=object)
+    shore = bank.shore.to_crs(crs).geometry.to_numpy()
     banks = shapely.get_parts(shapely.line_merge(shapely.union_all(shore)))
     banks = np.array([line for line in banks if isinstance(line, LineString)], dtype=object)
     segments, bank_ids = [], []
-    for bank, line in enumerate(banks):
+    for piece, line in enumerate(banks):
         # A long straight bank still needs passing access along its length.
         # Subdivision chooses candidates without changing the shore geometry.
         coords = list(shapely.segmentize(line, spacing_m).coords)
         for one, other in zip(coords[:-1], coords[1:], strict=True):
             segments.append(LineString([one, other]))
-            bank_ids.append(bank)
+            bank_ids.append(piece)
     shores = shapely.STRtree(segments)
     # The same centimetre grid closes delivery seams in the paddle builder.
     water = shapely.set_precision(shapely.force_2d(access.surfaces.to_crs(crs).geometry.to_numpy()), NODE_TOLERANCE_M)
@@ -84,12 +84,12 @@ def launches(sources: list[NetworkSource], walking: Network, access: Access, *, 
         crossing = road_lines[road].intersection(segments[segment])
         for point in shapely.get_parts(crossing):
             if isinstance(point, Point):
-                bank = bank_ids[segment]
-                occupied.setdefault(bank, []).append(float(banks[bank].project(point)))
+                piece = bank_ids[segment]
+                occupied.setdefault(piece, []).append(float(banks[piece].project(point)))
     kept: list[dict[str, Any]] = []
     seen: set[bytes] = set()
     rejected_water = rejected_dam = spaced = 0
-    for origin, tie, bank in candidates:
+    for origin, tie, piece in candidates:
         if tie.length <= NODE_TOLERANCE_M or tie.length > LAUNCH_M:
             continue
         key = shapely.normalize(tie).wkb
@@ -101,10 +101,10 @@ def launches(sources: list[NetworkSource], walking: Network, access: Access, *, 
         if nearest_segment is None or foot.distance(segments[int(nearest_segment)]) + NODE_TOLERANCE_M < tie.length:
             continue
         end = Point(tie.coords[-1])
-        along = float(banks[bank].project(end))
-        distances = [abs(along - previous) for previous in occupied.get(bank, [])]
-        if banks[bank].is_ring:
-            distances = [min(distance, banks[bank].length - distance) for distance in distances]
+        along = float(banks[piece].project(end))
+        distances = [abs(along - previous) for previous in occupied.get(piece, [])]
+        if banks[piece].is_ring:
+            distances = [min(distance, banks[piece].length - distance) for distance in distances]
         if distances and min(distances) < (spacing_m if origin == "passing" else NODE_TOLERANCE_M):
             spaced += 1
             continue
@@ -117,8 +117,8 @@ def launches(sources: list[NetworkSource], walking: Network, access: Access, *, 
         if len(hits) and tie.intersection(shapely.union_all(water[hits])).length > NODE_TOLERANCE_M:
             rejected_water += 1
             continue
-        kept.append({"origin": origin, "shore": bank, "shore_m": along, "geometry": tie})
-        occupied.setdefault(bank, []).append(along)
+        kept.append({"origin": origin, "shore": piece, "shore_m": along, "geometry": tie})
+        occupied.setdefault(piece, []).append(along)
     frame = gpd.GeoDataFrame(kept, columns=["origin", "shore", "shore_m", "geometry"], crs=crs)
     lengths = frame.length
     print(

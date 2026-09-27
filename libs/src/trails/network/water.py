@@ -4,7 +4,7 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, NamedTuple
 
 import geopandas as gpd
 import numpy as np
@@ -51,11 +51,52 @@ SURFACE_CLASS = "water_class"
 
 
 @dataclass(frozen=True)
+class Bank:
+    """The bank land access is measured against, and the water pieces it closes.
+
+    These are the lines :func:`paddle` draws along and across the water, kept
+    apart from the paddled sources: portages join these pieces and launches
+    reach this bank, and neither may move when the paddled line moves off it.
+
+    Attributes:
+        shore: The dissolved bank, simplified at ``SHORE_SIMPLIFY_M`` and cut
+            at the dam discs, with its owner's columns
+        open_water: The triangulation between the bank's vertices and the
+            lake-owned interfaces, cut the same way
+        streams: The class-2 stream pieces cut at the dams, or None
+    """
+
+    shore: gpd.GeoDataFrame
+    open_water: gpd.GeoDataFrame
+    streams: gpd.GeoDataFrame | None = None
+
+    def pieces(self) -> list[tuple[str, gpd.GeoDataFrame]]:
+        """The lines in the order the paddled sources list them, each with its source's name."""
+        found = [(SHORE, self.shore), (OPEN_WATER, self.open_water)]
+        return found if self.streams is None else [*found, (STREAMS, self.streams)]
+
+
+@dataclass(frozen=True)
 class Access:
-    """Cached, unsimplified water and dam points for checking land-only launches."""
+    """What land access is checked against: cached, unsimplified water, dam points and the bank.
+
+    Attributes:
+        surfaces: Unsimplified source water, for a launch's dry check
+        dams: Dam points and lock gates, or None
+        bank: The bank portages and launches measure to, or None where there
+            is no paddled water
+    """
 
     surfaces: gpd.GeoDataFrame
     dams: gpd.GeoDataFrame | None = None
+    bank: Bank | None = None
+
+
+class Paddle(NamedTuple):
+    """The paddled sources and the bank they were drawn from."""
+
+    sources: list[NetworkSource]
+    bank: Bank
 
 
 def _registered_level(value: Any) -> float:
@@ -78,7 +119,31 @@ def sources(
     dams: gpd.GeoDataFrame | None = None,
     extent: gpd.GeoDataFrame | None = None,
 ) -> list[NetworkSource]:
-    """Turn water outlines and classed stream lines into paddled sources.
+    """The paddled sources of :func:`paddle`, without the bank."""
+    return paddle(
+        surfaces,
+        metric_crs=metric_crs,
+        class_field=class_field,
+        lake_classes=lake_classes,
+        level_field=level_field,
+        streams=streams,
+        dams=dams,
+        extent=extent,
+    ).sources
+
+
+def paddle(
+    surfaces: gpd.GeoDataFrame,
+    *,
+    metric_crs: str,
+    class_field: str | None = None,
+    lake_classes: tuple[str, ...] = (),
+    level_field: str | None = None,
+    streams: gpd.GeoDataFrame | None = None,
+    dams: gpd.GeoDataFrame | None = None,
+    extent: gpd.GeoDataFrame | None = None,
+) -> Paddle:
+    """Turn water outlines and classed stream lines into paddled sources and the bank land access reads.
 
     Args:
         surfaces: Water polygons, with delivery pieces retained until dissolution
@@ -91,7 +156,8 @@ def sources(
         extent: Map boundary, cut after dissolution so it cannot become shore
 
     Returns:
-        Shore and open-water sources, and directed streams when supplied
+        Shore and open-water sources, and directed streams when supplied; and
+        the bank, which today is the same lines
     """
     if surfaces.crs is None:
         raise ValueError("water surfaces need a coordinate reference system")
@@ -190,7 +256,9 @@ def sources(
     )
     if cut is not None:
         result.append(NetworkSource(STREAMS, cut.to_crs(source_crs), kind=PADDLE, directed=True, keep_whole=True))
-    return result
+    # The same frames, not copies: land access measures exactly the lines that are paddled today.
+    bank = Bank(result[0].gdf, result[1].gdf, result[2].gdf if cut is not None else None)
+    return Paddle(result, bank)
 
 
 def _outside_dams(line: LineString, tree: shapely.STRtree) -> list[LineString]:
@@ -413,11 +481,11 @@ def _components(count: int, pairs: np.ndarray) -> np.ndarray:
     return np.unique([root(i) for i in range(count)], return_inverse=True)[1]
 
 
-def portages(water_sources: list[NetworkSource], walking: Network, *, distance_m: float = PORTAGE_M) -> list[NetworkSource]:
+def portages(bank: Bank, walking: Network, *, distance_m: float = PORTAGE_M) -> list[NetworkSource]:
     """Join nearby connected water pieces and tie the feet to walking nodes.
 
     Args:
-        water_sources: Paddled lines after dam cuts
+        bank: The bank and water pieces of :func:`paddle`, after dam cuts
         walking: The noded walking network, in a metric CRS
         distance_m: Largest inferred carry between connected water pieces
 
@@ -427,7 +495,8 @@ def portages(water_sources: list[NetworkSource], walking: Network, *, distance_m
     if walking.edges.crs is None or not walking.edges.crs.is_projected:
         raise ValueError("portages need a projected walking network")
     metric_crs = walking.edges.crs
-    arrays = [source.gdf.to_crs(metric_crs).geometry.to_numpy() for source in water_sources]
+    pieces = bank.pieces()
+    arrays = [frame.to_crs(metric_crs).geometry.to_numpy() for _, frame in pieces]
     lines = np.concatenate(arrays) if arrays else np.empty(0, dtype=object)
     chords: list[LineString] = []
     ties: dict[bytes, LineString] = {}
@@ -440,8 +509,8 @@ def portages(water_sources: list[NetworkSource], walking: Network, *, distance_m
         groups = [shapely.union_all(lines[labels == i]) for i in range(count)]
         # A point on the shore nearest its own box centre remains on its piece,
         # even around islands, and is independent of the density of its chords.
-        shores = np.concatenate([np.full(len(array), source.name != OPEN_WATER) for source, array in zip(water_sources, arrays, strict=True)])
-        rings = np.concatenate([np.full(len(array), source.name == SHORE) for source, array in zip(water_sources, arrays, strict=True)])
+        shores = np.concatenate([np.full(len(array), name != OPEN_WATER) for (name, _), array in zip(pieces, arrays, strict=True)])
+        rings = np.concatenate([np.full(len(array), name == SHORE) for (name, _), array in zip(pieces, arrays, strict=True)])
         representatives = []
         obstacles = []
         for i, group in enumerate(groups):
@@ -508,7 +577,8 @@ def build(
         rules: Country's projection and coverage rules
         protected: Protected areas
         measure: Country's height reader
-        access: Unsimplified water and dams for launch checks
+        access: Unsimplified water and dams for launch checks, and the bank
+            portages and launches measure to; needed when there is paddled water
 
     Returns:
         Measured combined network and per-source chain counts
@@ -531,9 +601,12 @@ def build(
     walking = node(walking_sources)
     print(f"  Walking graph build before water: {time.perf_counter() - started:.3f} s; {len(walking.edges):,} edges")
     started = time.perf_counter()
-    added = portages([source for source in sources if source.kind == PADDLE], walking)
-    if access is not None:
-        added.append(launches(sources, walking, access))
+    if access is None or access.bank is None:
+        raise ValueError("paddled water needs the bank it was drawn from: an Access carrying paddle()'s bank")
+    # Land access reads the bank explicitly, not the paddled sources, so a
+    # paddled line drawn off the bank leaves every carry and launch in place.
+    added = portages(access.bank, walking)
+    added.append(launches(access.bank, walking, access))
     sources[:] = [source for source in sources if source.name not in inferred] + added
     network = node(sources)
     print(f"  Combined graph build with carries and launches: {time.perf_counter() - started:.3f} s; {len(network.edges):,} edges")

@@ -925,6 +925,38 @@ no whole-offset-distance launch eligibility, no new PORTAGE across a narrow. Sto
 unresolved anchors or inability to retain phase-7 decisions. Do not replace real missing
 joins with globally nearest straight lines.
 
+**Done 2026-09-27 — 12d-1: carries and launches read the bank explicitly; every one of them
+is main's, byte for byte.** `water.py`, `launches.py`, the two loaders and `test_water.py`. No
+graph, page, tile or browser run, no new dependency. Evidence, scripts and logs are in scratch,
+`~/mockups/kayak-mode/offset-plan/phase-12d/` (`README.md` first).
+
+*What changed.* `water.paddle` is what `water.sources` was and also returns a `Bank`: the Shore,
+Open water and Streams frames it has just drawn — the same objects, not copies — which is the
+dissolved, 5 m-simplified, dam-cut bank and the lines that close each water piece. `sources`
+still returns the paddled sources alone. `water.portages(bank, walking)` and
+`launches.launches(bank, walking, access)` read only that bank; the loaders put it into `Access`,
+and `water.build` hands `access.bank` to both and refuses paddled water without one. So when 12e
+moves the paddled Shore offshore, land access keeps measuring to the bank it measures to today:
+phase 1b's components, Delaunay neighbours, 1 km carries, third-water exclusion and 150 m ties,
+phase 10's 30 m reach and 100 m spacing. Nothing in it is measured against the unsimplified bank.
+
+*The proof* (`identity.py`): main `bc9e22e`'s two functions against this code on the inputs phase
+10's final builds handed them (`phase10/final/<map>/launch-inputs.pkl`), compared as exact WKB in
+order, with the launches' origin, bank and station:
+
+| | Abisko | Malingsbo-Kloten | Lomsdal-Visten |
+|---|---:|---:|---:|
+| Portage chords / km | 437 / 207.115 | 699 / 340.986 | 1,010 / 481.243 |
+| Walking ties / km | 81 / 6.616 | 701 / 47.656 | 285 / 20.203 |
+| Launches / m (= their path-priced metres) | 350 / 4,915.738 | 2,220 / 30,915.681 | 1,825 / 23,232.458 |
+| Identical to main; launches identical to phase 10's built catalogue | yes; yes | yes; yes | yes; yes |
+| Wall s / peak RSS MB, both codes, 4 GiB cap | 34 / 350 | 82 / 535 | 108 / 723 |
+
+On each of 12a's twelve frozen patches the whole chain was run from the surfaces as well — main's
+`water.sources` against `water.paddle` on the patch's water, streams and dams: every source
+identical, the bank's frames the sources' own, and portages, ties and launches identical. The
+launch counts are the frozen baseline's 350 / 2,220 / 1,825.
+
 ### Phase 12e — Integrate sources, chords and encoded roles
 
 *Files:* `water.py`, `routing/sources.py` only if attributes require it,
