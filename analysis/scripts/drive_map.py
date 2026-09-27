@@ -115,6 +115,32 @@ class WaterLeg:
 
 
 @dataclass(frozen=True)
+class OffsetTaps:
+    """Fixed raw taps for the line off the bank (``kayak-offset-phases.md``, phase 12f).
+
+    Read only on a page whose graph carries water roles, the build's switch on;
+    each is a position a finger put down, never one read off the page's network.
+    """
+
+    #: On a lake's bank, its Shore line about 15 m out and no land within a finger.
+    near_bank: tuple[float, float]
+    #: A second such tap on the same lake, the far end of a routed leg from the first.
+    goal: tuple[float, float]
+    #: Beside the bank of water narrower than 30 m, whose middle is Narrow water.
+    narrow: tuple[float, float]
+    #: On a mapped way within a finger of the water, nearer than the line off the bank.
+    land: tuple[float, float]
+    #: On a launch, the last metres from a road to the bank.
+    launch: tuple[float, float]
+    #: Out on a lake, beyond every travel line's reach at z17.
+    offshore: tuple[float, float]
+    #: On an island's bank where another island's or the mainland's line lies within 17.1 m.
+    island: tuple[float, float]
+    #: On a stream above its mouth.
+    stream: tuple[float, float]
+
+
+@dataclass(frozen=True)
 class Scene:
     """What one page has that the checks need and the checks cannot find alone.
 
@@ -253,6 +279,9 @@ class Scene:
     #: The measured path alternative: before phase 8 for the original scenes,
     #: re-measured with landing joins when phase 9 replaces a scene.
     kayak_portage_path_m: float | None = None
+    #: The taps phase 12f reads the line off the bank with; None where this scene's
+    #: page has not been built with the switch on (12g switches a map on).
+    offset_taps: OffsetTaps | None = None
     #: A fix beside a bend or an end of the planned route, where different
     #: accuracies give distinct bearings. None uses the first point's north side.
     aim_from: tuple[float, float] | None = None
@@ -327,6 +356,10 @@ SCENES: dict[str, Scene] = {
             "a kayak launches from the road",
             "the kayak path switch changes the carry",
             "a way enters the middle of a road",
+            # Phase 12f's readings of the line off the bank run only on a page built with
+            # the switch on; 12g switches each map on and takes these two out.
+            "the tap takes the line off the bank",
+            "the line off the bank is counted once",
         ),
         long_chain="trail-group-ut-no-414306-7244296-42442",
         position=(65.55, 13.05),
@@ -512,12 +545,32 @@ SCENES: dict[str, Scene] = {
         kayak_bay=WaterLeg(((68.355318, 18.836408), (68.358208, 18.865112)), shore_m=3091.4545097209148),
         kayak_portage=((68.268452, 18.179781), (68.271026, 18.180649)),
         kayak_portage_path_m=335.9521263872096,
+        # Chosen on the switch-on page of phase 12f (offset-plan/phase-12f/choose_taps.py), on
+        # Torneträsk by Abisko: bank taps 1.5 m into the water with no way within 25 m, the Shore
+        # line 13.1 and 12.8 m out, 694 m apart; beside the goal a channel whose Narrow water is
+        # 2.7 m off; a path 1 m away with the line 15.8 m out; a launch; open water with no line
+        # within 30 m; an island's bank with its own line 13.1 m out and the next 19.0 m; a
+        # one-way stream 1 m aside.
+        offset_taps=OffsetTaps(
+            near_bank=(68.3923378, 18.7150117),
+            goal=(68.3969105, 18.7035531),
+            narrow=(68.3969754, 18.7030202),
+            land=(68.3818747, 18.6630532),
+            launch=(68.3904249, 18.715991),
+            offshore=(68.3935079, 18.7187613),
+            island=(68.4177194, 18.7008332),
+            stream=(68.3978674, 18.7011705),
+        ),
         # The level channel is Korslången's; the phase-10 road and switch fixtures are at Kloten.
         skips=(
             "a level channel is paddled both ways",
             "a kayak launches from the road",
             "the kayak path switch changes the carry",
             "a way enters the middle of a road",
+            # Phase 12f's readings of the line off the bank run only on a page built with
+            # the switch on; 12g switches each map on and takes these two out.
+            "the tap takes the line off the bank",
+            "the line off the bank is counted once",
         ),
         # Kungsleden from Abisko to Abiskojaure and Rallarvägen on to Tornehamn,
         # one register chain of 30.7 km.
@@ -836,6 +889,10 @@ SCENES: dict[str, Scene] = {
             "a planned leg that is not worth routing",
             "a way across a sound goes round by land",
             "a borrowed name has its register under it",
+            # Phase 12f's readings of the line off the bank run only on a page built with
+            # the switch on; 12g switches each map on and takes these two out.
+            "the tap takes the line off the bank",
+            "the line off the bank is counted once",
         ),
         # The measured 29.3 % detour leaves margin above this scene's 20 % floor.
         way_over_flight=1.2,
@@ -7644,6 +7701,7 @@ def read_water_leg(
     measure_routing: bool = False,
     measure_shore: bool = False,
     raw_zoom: int | None = None,
+    measure_export: bool = False,
 ) -> dict[str, Any]:
     """Borrow the plan for a scene leg, read its parts and restore its state.
 
@@ -7659,6 +7717,7 @@ def read_water_leg(
         measure_routing: Read the chosen search label through the drive-only probe
         measure_shore: Read paddled coordinates through the drive-only probe
         raw_zoom: Place raw finger taps at this zoom, and read interior-entry geometry
+        measure_export: Read both files' track lengths, the parts' source credit and the landings used
 
     Returns:
         The public plan and profile readings, with a state-restoration comparison
@@ -7771,6 +7830,24 @@ def read_water_leg(
             }""",
             {"via": via, "measureRouting": measure_routing, "measureShore": measure_shore},
         )
+        if measure_export:
+            got["export"] = page.evaluate("""() => {
+                const far = trailsProfilePanel.metresBetween, files = {}, credit = {};
+                for (const [kind, text] of Object.entries(kayakMeasure.files())) {
+                    const doc = new DOMParser().parseFromString(text, 'application/xml');
+                    const at = [...doc.querySelectorAll(kind === 'gpx' ? 'trkpt' : 'rtept')]
+                        .map(v => [Number(v.getAttribute('lon')), Number(v.getAttribute('lat'))]);
+                    let metres = 0;
+                    for (let i = 1; i < at.length; i++) metres += far(at[i - 1][0], at[i - 1][1], at[i][0], at[i][1]);
+                    files[kind] = {vertices: at.length, metres};
+                }
+                const parts = kayakMeasure.parts();
+                for (const part of parts) for (const [source, metres] of Object.entries(part.sources))
+                    credit[source] = (credit[source] || 0) + metres;
+                return {files, credit, partsMetres: parts.reduce((sum, part) => sum + part.length, 0),
+                    landing: parts.reduce((sum, part) => sum + part.landing, 0),
+                    landingEdges: parts.flatMap(part => part.landingEdges)};
+            }""")
         if raw_zoom is not None:
             got["entry"] = page.evaluate("""() => {
                 const s=trailsPlan.state(),g=trailsGraph,m=kayakMeasure,j=m.joinedRoute(g,s.points[0],s.points[1]);
@@ -8218,6 +8295,267 @@ def a_way_enters_the_middle_of_a_road(page: Any) -> Check:
             noted("walking E8: price", walk["entry"]["cost"]),
         ]
     )
+    return Check(name, readings)
+
+
+#: What a placed tap turned out to be, read off the plan's last point and the
+#: page's graph. ``nearestTravel`` is an exhaustive scan over every travel
+#: segment, in metres on a local plane around the tap, and ``moved`` is measured
+#: on the same plane, so the two compare without a projection between them.
+DESCRIBE_TAP = """tap => {
+    const s = trailsPlan.state(), p = s.points[s.points.length - 1], g = trailsGraph;
+    const lat0 = tap[0], lon0 = tap[1], kx = 111320 * Math.cos(lat0 * Math.PI / 180), ky = 111320;
+    const x = lon => (lon - lon0) * kx, y = lat => (lat - lat0) * ky;
+    let nearestTravel = Infinity;
+    for (let e = 0; e < g.header.edges; e++) {
+        if (g.header.sources[g.sources[e]].role !== 'travel') continue;
+        for (let v = g.vertexAt[e]; v + 1 < g.vertexAt[e + 1]; v++) {
+            const ax = x(g.coordinates[2 * v]), ay = y(g.coordinates[2 * v + 1]);
+            const bx = x(g.coordinates[2 * v + 2]), by = y(g.coordinates[2 * v + 3]);
+            const dx = bx - ax, dy = by - ay, span = dx * dx + dy * dy;
+            const t = span ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / span)) : 0;
+            nearestTravel = Math.min(nearestTravel, Math.hypot(ax + t * dx, ay + t * dy));
+        }
+    }
+    const on = [];
+    if (p.edge >= 0) on.push(p.edge);
+    if (p.node >= 0) for (let e = 0; e < g.header.edges; e++) if (g.fromNode[e] === p.node || g.toNode[e] === p.node) on.push(e);
+    const lines = on.map(e => {
+        const source = g.header.sources[g.sources[e]];
+        return {edge: e, kind: source.kind, role: source.role || null, name: source.name, oneWay: !!g.oneWay[e]};
+    });
+    return {lat: p.lat, lon: p.lon, node: p.node, edge: p.edge, along: p.along, lines,
+        bankAnchor: p.node >= 0 && !!g.bankAnchor[p.node], moved: Math.hypot(x(p.lon), y(p.lat)), nearestTravel,
+        zoom: null};
+}"""
+
+
+def water_roles(page: Any) -> bool:
+    """Whether the page's graph says what its paddled lines are for: the build's switch on."""
+    return bool(page.evaluate("() => !!trailsGraph.roleOf && trailsGraph.roleOf.some(role => role !== null)"))
+
+
+def placed_taps(page: Any, taps: list[tuple[float, float]], *, zoom: int, paddling: bool = True, paths: bool = False) -> dict[str, Any]:
+    """Put each raw tap down at a zoom on an empty borrowed plan, read the point it became, and restore.
+
+    Args:
+        page: The driven page
+        taps: Latitude and longitude of each finger
+        zoom: The zoom every tap is put down at, which sets the finger's reach
+        paddling: Kayak or walking
+        paths: The Stay-on-paths setting
+
+    Returns:
+        ``points``, one :data:`DESCRIBE_TAP` reading per tap, and ``restored``
+    """
+    page.wait_for_function("() => !trailsPlan.busy() && !trailsGoal.state().working")
+    saved = page.evaluate(KAYAK_PAGE_STATE)
+    page.evaluate("() => { window.trailsDriveHistory = window.kayakMeasure?.keepHistory?.(); }")
+    view = page.evaluate(with_map("() => ({center: __MAP__.getCenter(), zoom: __MAP__.getZoom()})"))
+    changed = 0
+    points: list[dict[str, Any]] = []
+    try:
+        page.evaluate("s => { trailsPlan.kayak(s.kayak); trailsPlan.stayOnPaths(s.paths); }", {"kayak": paddling, "paths": paths})
+        # An empty plan, so a placed tap routes no leg from a point the reader left.
+        page.evaluate("p => trailsPlan.fromPlaces([{lat:p[0],lon:p[1]}])", taps[0])
+        changed += 1
+        page.wait_for_function("() => !trailsPlan.busy()", timeout=120_000)
+        page.evaluate("() => trailsPlan.remove(0)")
+        changed += 1
+        page.wait_for_function("() => !trailsPlan.busy() && trailsPlan.state().points.length === 0", timeout=120_000)
+        for tap in taps:
+            page.evaluate(with_map("a => { __MAP__.setView(a.point, a.zoom, {animate:false}); }"), {"point": tap, "zoom": zoom})
+            page.evaluate("p => trailsPlan.place(p[0], p[1])", tap)
+            changed += 1
+            page.wait_for_function("() => !trailsPlan.busy() && trailsPlan.state().points.length === 1", timeout=120_000)
+            point = page.evaluate(DESCRIBE_TAP, tap)
+            point["zoom"] = page.evaluate(with_map("() => __MAP__.getZoom()"))
+            points.append(point)
+            page.evaluate("() => trailsPlan.undo()")
+            changed -= 1
+            page.wait_for_function("() => !trailsPlan.busy() && trailsPlan.state().points.length === 0", timeout=120_000)
+    finally:
+        for _ in range(changed):
+            page.evaluate("() => trailsPlan.undo()")
+            page.wait_for_function("() => !trailsPlan.busy()", timeout=120_000)
+        page.evaluate("() => { window.trailsDriveHistory?.(); delete window.trailsDriveHistory; }")
+        page.evaluate(
+            """s => { trailsPlan.kayak(s.kayak); trailsPlan.stayOnPaths(s.paths);
+            trailsGoal.way(s.goal.way); trailsPlan.select(s.plan.chosen); trailsPlan.toggle(s.plan.on); }""",
+            saved,
+        )
+        page.wait_for_function("() => !trailsPlan.busy() && !trailsGoal.state().working", timeout=120_000)
+        page.evaluate(with_map("view => { __MAP__.setView(view.center, view.zoom, {animate: false}); }"), view)
+        painted(page)
+    return {"points": points, "restored": page.evaluate(KAYAK_PAGE_STATE) == saved}
+
+
+def finger_m(lat: float, zoom: int) -> float:
+    """The reach of a finger at a zoom, as the page's ``fingerReach`` works it out."""
+    from lomsdal_visten import SNAP_M, SNAP_PX
+
+    return float(min(SNAP_M, SNAP_PX * 40075016.686 * math.cos(math.radians(lat)) / 2 ** (zoom + 8)))
+
+
+def from_bank_m(points: list[tuple[float, float]]) -> list[float | None]:
+    """How far each position lies inside the scene's unsimplified source water; None where it is on land."""
+    import shapely
+    from pyproj import Transformer
+
+    water = shore_source_water(SCENE.stem)
+    transform = Transformer.from_crs(4326, water.crs, always_xy=True)
+    out: list[float | None] = []
+    for lat, lon in points:
+        here = shapely.Point(*transform.transform(lon, lat))
+        inside = water[water.contains(here)]
+        out.append(float(inside.boundary.distance(here).min()) if len(inside) else None)
+    return out
+
+
+def across_m(point: tuple[float, float]) -> tuple[float, float] | None:
+    """The source bank's distance from a position, and the far bank's straight across from the nearer one.
+
+    Straight across is away from the nearest bank point, the direction the two banks of a
+    channel face each other in; None where the position is on land.
+    """
+    import shapely
+    import shapely.ops
+    from pyproj import Transformer
+
+    water = shore_source_water(SCENE.stem)
+    transform = Transformer.from_crs(4326, water.crs, always_xy=True)
+    here = shapely.Point(*transform.transform(point[1], point[0]))
+    inside = water[water.contains(here)]
+    if not len(inside):
+        return None
+    body = inside.geometry.iloc[0]
+    near, _ = shapely.ops.nearest_points(body.boundary, here)
+    d = here.distance(near)
+    reach = 4 * d + 50
+    ray = shapely.LineString([(here.x, here.y), (here.x + (here.x - near.x) / d * reach, here.y + (here.y - near.y) / d * reach)])
+    crossing = ray.intersection(body.boundary)
+    far = min((here.distance(p) for p in shapely.get_parts(crossing)), default=float("inf"))
+    return d, far
+
+
+def the_tap_takes_the_line_off_the_bank(page: Any) -> Check:
+    """Fixed raw taps snap to the line off the bank, keep land and launches, and leave open water raw."""
+    from trails.network.paddle_geometry import CONTOUR_CLEARANCE_M, CONTOUR_DEVIATION_M, PADDLE_OFFSET_M
+
+    name = "the tap takes the line off the bank"
+    if not water_roles(page):
+        return Check(name, skipped="this page's graph carries no water roles: its line follows the bank (the build's switch is off)")
+    taps = SCENE.offset_taps
+    if taps is None:
+        return Check(name, skipped="this scene has no taps for the line off the bank yet (12g switches a map on)")
+    band = PADDLE_OFFSET_M + CONTOUR_DEVIATION_M
+    readings: list[Reading] = []
+    order = ("near_bank", "goal", "narrow", "land", "launch", "offshore", "island", "stream")
+    for zoom in (17, 15):
+        got = placed_taps(page, [getattr(taps, key) for key in order], zoom=zoom)
+        read = dict(zip(order, got["points"], strict=True))
+        prefix = f"z{zoom}"
+        readings.append(Reading(f"{prefix}: the mode, goal way and plan are put back", got["restored"], True))
+        for key, point in read.items():
+            readings.append(noted(f"{prefix} {key}: lines, moved m, nearest travel m", [point["lines"], point["moved"], point["nearestTravel"]]))
+            readings.append(
+                Reading(f"{prefix} {key}: not on a landing", any(line["role"] == "landing" for line in point["lines"] if point["node"] < 0), False)
+            )
+            readings.append(Reading(f"{prefix} {key}: not on a bank anchor", point["bankAnchor"], False))
+        roles = {key: {line["role"] for line in point["lines"]} for key, point in read.items()}
+        kinds = {key: {line["kind"] for line in point["lines"]} for key, point in read.items()}
+        names = {key: {line["name"] for line in point["lines"]} for key, point in read.items()}
+        finger = finger_m(taps.near_bank[0], zoom)
+        readings.append(noted(f"{prefix}: the finger's reach, m", finger))
+        for key in ("near_bank", "goal", "island"):
+            readings.append(Reading(f"{prefix} {key}: on the travel line", "travel" in roles[key], True))
+            # A junction within 2 m of the line is taken for it (`NODE_FIRST_M`), so a tap may move that much further.
+            readings.append(Reading(f"{prefix} {key}: moved at most d + 2.1 m, and a junction's 2 m", read[key]["moved"] <= band + 2, True))
+            # The nearest travel line and not a farther one: another island's, or the far bank's.
+            readings.append(Reading(f"{prefix} {key}: the nearest travel line", read[key]["moved"] <= read[key]["nearestTravel"] + 2.05, True))
+        readings.append(Reading(f"{prefix} narrow: on Narrow water", "Narrow water" in names["narrow"], True))
+        readings.append(Reading(f"{prefix} land: kept on land", kinds["land"] & {"paddle"} == set() and bool(kinds["land"]), True))
+        readings.append(Reading(f"{prefix} land: within the finger", read["land"]["moved"] <= finger, True))
+        readings.append(Reading(f"{prefix} launch: kept on the launch", "launch" in kinds["launch"], True))
+        offshore = read["offshore"]
+        readings.append(Reading(f"{prefix} offshore: on no travel line", "travel" in roles["offshore"], False))
+        if not offshore["lines"]:
+            readings.append(Reading(f"{prefix} offshore: stays where it was put", offshore["moved"], 0, within=0.001))
+        readings.append(Reading(f"{prefix} stream: on the stream", roles["stream"], {"stream"}))
+        stream_lines = [line for line in read["stream"]["lines"] if line["role"] == "stream"]
+        readings.append(Reading(f"{prefix} stream: part way along its edge", read["stream"]["edge"] >= 0 and bool(stream_lines), True))
+        readings.append(noted(f"{prefix} stream: one way", [line["oneWay"] for line in stream_lines]))
+        banks = from_bank_m([(read[key]["lat"], read[key]["lon"]) for key in ("near_bank", "goal", "narrow")])
+        readings.append(noted(f"{prefix}: near_bank, goal, narrow from the source bank, m", banks))
+        for key, metres in zip(("near_bank", "goal"), banks[:2], strict=True):
+            readings.append(Reading(f"{prefix} {key}: at least 12 m off the source bank", metres is not None and metres >= CONTOUR_CLEARANCE_M, True))
+        readings.append(Reading(f"{prefix} narrow: in water narrower than the offset", banks[2] is not None and banks[2] < PADDLE_OFFSET_M, True))
+        across = across_m((read["narrow"]["lat"], read["narrow"]["lon"]))
+        readings.append(noted(f"{prefix} narrow: this bank and the far bank straight across, m", across))
+        # The plan's gate for narrow water (§4.4): within min(1 m, 10 % of the width) of the middle.
+        readings.append(
+            Reading(
+                f"{prefix} narrow: in the middle",
+                across is not None and abs(across[1] - across[0]) / 2 <= min(1.0, 0.1 * (across[0] + across[1])),
+                True,
+            )
+        )
+    for paths in (False, True):
+        walk = placed_taps(page, [getattr(taps, key) for key in order], zoom=15, paddling=False, paths=paths)
+        prefix = f"walking, Stay on paths {'on' if paths else 'off'}"
+        readings.append(Reading(f"{prefix}: the mode, goal way and plan are put back", walk["restored"], True))
+        # A node counts as walked ground when any of its lines is: a road end a launch leaves from is a road.
+        water = [
+            key
+            for key, point in zip(order, walk["points"], strict=True)
+            if point["lines"] and all(line["kind"] in ("paddle", "portage", "launch") for line in point["lines"])
+        ]
+        readings.append(Reading(f"{prefix}: no tap snaps to water, a carry or a launch", water, []))
+    return Check(name, readings)
+
+
+def the_line_off_the_bank_is_counted_once(page: Any) -> Check:
+    """A way along the line and a way from a launch count every piece once, in the panel, the profile and both files."""
+    name = "the line off the bank is counted once"
+    if not water_roles(page):
+        return Check(name, skipped="this page's graph carries no water roles: its line follows the bank (the build's switch is off)")
+    taps = SCENE.offset_taps
+    if taps is None:
+        return Check(name, skipped="this scene has no taps for the line off the bank yet (12g switches a map on)")
+    paddled = {"Shore", "Narrow water", "Landing water", "Open water", "Streams"}
+    readings: list[Reading] = []
+    for paths in (False, True):
+        for label, points in (("along the lake", (taps.near_bank, taps.goal)), ("from the launch", (taps.launch, taps.near_bank))):
+            got = read_water_leg(page, points, paths=paths, raw_zoom=17, measure_shore=True, measure_export=True)
+            prefix = f"{label}, Stay on paths {'on' if paths else 'off'}"
+            state, export = got["state"], got["export"]
+            whole = state["walked"] + state["crossed"]
+            readings.extend(water_leg_readings(got, prefix))
+            words = f"{whole / 1000:.2f} km · {state['crossed'] / 1000:.2f} km 🛶 · {state['walked'] / 1000:.2f} km 🚶"
+            readings.append(Reading(f"{prefix}: the panel's total · 🛶 · 🚶", words in got["planningLine"], True))
+            readings.append(Reading(f"{prefix}: the profile is the whole way, m", got["heights"]["span"], whole, within=0.01))
+            readings.append(Reading(f"{prefix}: the drawn parts are the whole way, m", export["partsMetres"], whole, within=0.01))
+            credited = sum(metres for source, metres in export["credit"].items() if source in paddled)
+            readings.append(Reading(f"{prefix}: the paddled sources are the paddled metres", credited, state["crossed"], within=0.01))
+            readings.append(noted(f"{prefix}: credit by source, m", export["credit"]))
+            # Each landing the way uses is credited once, with the length the network gives it.
+            readings.append(
+                Reading(f"{prefix}: Landing water credited once, m", export["credit"].get("Landing water", 0.0), export["landing"], within=0.01)
+            )
+            readings.append(Reading(f"{prefix}: no landing edge is used twice", len(export["landingEdges"]), len(set(export["landingEdges"]))))
+            for kind in ("gpx", "garmin"):
+                readings.append(
+                    Reading(f"{prefix}: the {kind} track is the drawn way, m", export["files"][kind]["metres"], whole, within=max(1.0, 0.001 * whole))
+                )
+            if label == "along the lake":
+                readings.append(
+                    Reading(f"{prefix}: both taps are on the line", all(p.get("edge", -1) >= 0 or p["node"] >= 0 for p in state["points"]), True)
+                )
+                readings.append(Reading(f"{prefix}: all of it is paddled", state["walked"], 0, within=0.001))
+                readings.append(Reading(f"{prefix}: a lake stays on its plane", got["heights"]["high"] - got["heights"]["low"], 0, within=0.001))
+            else:
+                readings.append(Reading(f"{prefix}: a landing is paddled", export["landing"] > 0, True))
+            readings.append(noted(f"{prefix}: paddled / on foot, m", [state["crossed"], state["walked"]]))
     return Check(name, readings)
 
 
@@ -15328,6 +15666,10 @@ def drive(page: Any) -> list[Check]:
         checks.append(timed(a_way_enters_the_middle_of_a_road, page))
     if wanted(a_kayak_launches_from_the_road):
         checks.append(timed(a_kayak_launches_from_the_road, page))
+    if wanted(the_tap_takes_the_line_off_the_bank):
+        checks.append(timed(the_tap_takes_the_line_off_the_bank, page))
+    if wanted(the_line_off_the_bank_is_counted_once):
+        checks.append(timed(the_line_off_the_bank_is_counted_once, page))
     if wanted(the_kayak_path_switch_changes_the_carry):
         checks.append(timed(the_kayak_path_switch_changes_the_carry, page))
     if wanted(the_kayak_panel_counts_the_whole_way):
@@ -15524,6 +15866,8 @@ def main() -> int:
             or wanted(a_carry_uses_walking_prices)
             or wanted(a_way_enters_the_middle_of_a_road)
             or wanted(a_kayak_launches_from_the_road)
+            or wanted(the_tap_takes_the_line_off_the_bank)
+            or wanted(the_line_off_the_bank_is_counted_once)
             or wanted(the_kayak_path_switch_changes_the_carry)
             or wanted(the_kayak_panel_counts_the_whole_way)
             or wanted(a_paddled_profile_is_flat)
@@ -15546,7 +15890,8 @@ def main() -> int:
                 "keepHistory: () => { const kept = history.slice(); return () => { history = kept; refresh(); }; }, "
                 "parts: () => legs.flatMap(l => (l.parts || []).map(p => ({kind:p.kind, "
                 "lon:Array.from(p.lon), lat:Array.from(p.lat), length:p.length, sources:p.tally.sources, "
-                "portage:p.drivePortage || 0, launch:p.driveLaunch || 0, opened:p.driveOpened || []})))};\n"
+                "portage:p.drivePortage || 0, launch:p.driveLaunch || 0, opened:p.driveOpened || [], "
+                "landing:p.driveLanding || 0, landingEdges:p.driveLandingEdges || []})))};\n"
                 "const driveRoutedParts = routedParts; routedParts = (g, found) => { "
                 "const parts = driveRoutedParts(g, found), opened = [], work = router(g); "
                 "for (const e of found.edges) { if (g.header.sources[g.sources[e]].name !== 'Open water') continue; "
@@ -15561,7 +15906,12 @@ def main() -> int:
                 "let launch=found.edges.filter(e=>g.header.sources[g.sources[e]].kind==='launch').reduce((s,e)=>s+work.length[e],0); "
                 "for(const cut of [found.head,found.tail]) if(cut && g.header.sources[g.sources[cut.edge]].kind==='launch') "
                 "{const p=cutPart(g,cut); if(p) launch+=p.length;} "
-                "if(parts.length) {parts[0].driveOpened=opened; parts[0].drivePortage=portage; parts[0].driveLaunch=launch;} return parts; };\n"
+                "const landingEdges=found.edges.filter(e=>g.header.sources[g.sources[e]].role==='landing'); "
+                "let landing=landingEdges.reduce((s,e)=>s+work.length[e],0); "
+                "for(const cut of [found.head,found.tail]) if(cut && g.header.sources[g.sources[cut.edge]].role==='landing') "
+                "{const p=cutPart(g,cut); if(p){landing+=p.length; landingEdges.push(cut.edge);}} "
+                "if(parts.length) {parts[0].driveOpened=opened; parts[0].drivePortage=portage; parts[0].driveLaunch=launch; "
+                "parts[0].driveLanding=landing; parts[0].driveLandingEdges=landingEdges;} return parts; };\n"
             )
             if not SCENE.over_http:
                 address = f"{serving.enter_context(served(page_path.parent))}/{page_path.name}"

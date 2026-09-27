@@ -459,6 +459,18 @@
                 if (work.entryGeometry) { return work.entryGeometry; }
                 var along = new Float64Array(graph.coordinates.length / 2), latitude = 0, eligible = 0;
                 var far = panel().metresBetween;
+                // Where the line runs off the bank, a landing is entered only at
+                // its ends, which are nodes like any other (review's decision for
+                // phase 12f): its interior is the bank side of the travel line,
+                // which an entry would use to put the start back on the bank.
+                // `d` is measured to the lines that remain.
+                var landing = null;
+                if (kayak() && waterRoles(graph)) {
+                    landing = new Uint8Array(graph.header.edges);
+                    for (var each = 0; each < graph.header.edges; each += 1) {
+                        if (graph.roleOf[graph.sources[each]] === 'landing') { landing[each] = 1; }
+                    }
+                }
                 // Geometry is shared by all queries at this setting. Query work
                 // below follows only the cells intersecting the local radius.
                 for (var edge = 0; edge < graph.header.edges; edge += 1) {
@@ -471,9 +483,9 @@
                         }
                         along[v] = length;
                     }
-                    if (isFinite(work.cost[edge]) && work.length[edge]) { eligible += 1; }
+                    if (isFinite(work.cost[edge]) && work.length[edge] && !(landing && landing[edge])) { eligible += 1; }
                 }
-                work.entryGeometry = {index: edgeIndex(graph), along: along, latitude: latitude, eligible: eligible};
+                work.entryGeometry = {index: edgeIndex(graph), along: along, latitude: latitude, eligible: eligible, landing: landing};
                 return work.entryGeometry;
             }
 
@@ -509,6 +521,7 @@
 
             function entrySegments(graph, context, radius) {
                 var work = router(graph), out = [], seen = new Set(), index = context.geometry.index, p = context.point;
+                var landing = context.geometry.landing;
                 if (!index || !(radius > 0)) { return out; }
                 // Longitude's scale at the greatest absolute latitude and
                 // latitude's equatorial scale bound the page's scales below.
@@ -522,7 +535,7 @@
                         var cell = row * index.cols + col;
                         for (var k = index.at[cell]; k < index.at[cell + 1]; k += 1) {
                             var edge = index.item[k], vertex = index.vert[k];
-                            if (seen.has(vertex) || !isFinite(work.cost[edge]) || !work.length[edge]) { continue; }
+                            if (seen.has(vertex) || !isFinite(work.cost[edge]) || !work.length[edge] || (landing && landing[edge])) { continue; }
                             seen.add(vertex);
                             if (entrySegment(graph, context, vertex, false) > radius) { continue; }
                             var nearest = entrySegment(graph, context, vertex, true);
@@ -1626,6 +1639,84 @@
                 }
                 along += between(fx, fy, foot.lon, foot.lat);
                 return {edge: best, along: along, lon: foot.lon, lat: foot.lat, m: Math.sqrt(closest) * 111320};
+            }
+
+            // Whether the paddled lines say what they are for: only a graph
+            // whose line runs off the bank does (`roleOf` in the graph).
+            function waterRoles(graph) {
+                return !!graph.roleOf && graph.roleOf.some(function (role) { return role !== null; });
+            }
+
+            // **The nearest place of each kind a kayak tap can mean**, where
+            // the line runs off the bank: land (every way, carry and launch),
+            // the travel line (the offset contour and the middle of narrow
+            // water), a stream, and open water. A landing is none of them --
+            // it is the last metres from a bank anchor to the travel line, and
+            // a tap near the bank that took it would put the start back on the
+            // bank the line was moved off. A bank anchor is a node only
+            // landings reach, so it is no line's end here and is never offered.
+            // Each kind is searched within its own reach, the travel line
+            // within a wider one; a node at either end of a segment in reach
+            // is its kind's node candidate, so the junction rule can be asked
+            // per kind. Distances as in `nearestOnNetwork`.
+            function nearestByRole(graph, lat, lon, reach, travelReach) {
+                var index = edgeIndex(graph), co = graph.coordinates, lonScale = index.lonScale;
+                var far = Math.max(reach, travelReach) / 111320, between = panel().metresBetween;
+                var c0 = Math.max(0, Math.floor((lon - far / lonScale - index.minLon) / index.dLon));
+                var c1 = Math.min(index.cols - 1, Math.floor((lon + far / lonScale - index.minLon) / index.dLon));
+                var r0 = Math.max(0, Math.floor((lat - far - index.minLat) / index.dLat));
+                var r1 = Math.min(index.rows - 1, Math.floor((lat + far - index.minLat) / index.dLat));
+                var found = {land: null, travel: null, stream: null, open: null};
+                function offer(which, within, edge, v, t, away) {
+                    var limit = within / 111320;
+                    if (away >= limit * limit) { return; }
+                    var have = found[which];
+                    if (!have) { have = found[which] = {edge: -1, vertex: -1, t: 0, away: Infinity, node: -1, nodeM: Infinity}; }
+                    if (away < have.away) { have.edge = edge; have.vertex = v; have.t = t; have.away = away; }
+                    // A node is an edge's first or last vertex.
+                    var ends = [];
+                    if (v === graph.vertexAt[edge]) { ends.push(graph.fromNode[edge]); }
+                    if (v + 2 === graph.vertexAt[edge + 1]) { ends.push(graph.toNode[edge]); }
+                    for (var k = 0; k < ends.length; k += 1) {
+                        var m = between(lon, lat, graph.nodeLon[ends[k]], graph.nodeLat[ends[k]]);
+                        if (m < within && m < have.nodeM) { have.node = ends[k]; have.nodeM = m; }
+                    }
+                }
+                for (var r = r0; r <= r1; r += 1) {
+                    for (var c = c0; c <= c1; c += 1) {
+                        var cell = r * index.cols + c;
+                        for (var e = index.at[cell]; e < index.at[cell + 1]; e += 1) {
+                            var edge = index.item[e], source = graph.sources[edge];
+                            var kind = graph.header.sources[source].kind;
+                            if (kind === CROSSING || kind === CONNECTOR) { continue; }
+                            var which = kind !== PADDLE ? 'land' : graph.roleOf[source];
+                            if (which === 'landing' || !found.hasOwnProperty(which)) { continue; }
+                            var v = index.vert[e];
+                            var ax = co[2 * v], ay = co[2 * v + 1];
+                            var ex = (co[2 * v + 2] - ax) * lonScale, ey = co[2 * v + 3] - ay;
+                            var span = ex * ex + ey * ey;
+                            var px = (lon - ax) * lonScale, py = lat - ay;
+                            var t = span > 0 ? (px * ex + py * ey) / span : 0;
+                            t = t < 0 ? 0 : (t > 1 ? 1 : t);
+                            var qx = px - t * ex, qy = py - t * ey;
+                            offer(which, which === 'travel' ? travelReach : reach, edge, v, t, qx * qx + qy * qy);
+                        }
+                    }
+                }
+                Object.keys(found).forEach(function (which) {
+                    var have = found[which];
+                    if (!have || have.edge < 0) { found[which] = null; return; }
+                    var fx = co[2 * have.vertex], fy = co[2 * have.vertex + 1];
+                    var foot = {lon: fx + have.t * (co[2 * have.vertex + 2] - fx), lat: fy + have.t * (co[2 * have.vertex + 3] - fy)};
+                    var along = 0;
+                    for (var w = graph.vertexAt[have.edge]; w < have.vertex; w += 1) {
+                        along += between(co[2 * w], co[2 * w + 1], co[2 * w + 2], co[2 * w + 3]);
+                    }
+                    along += between(fx, fy, foot.lon, foot.lat);
+                    found[which] = {edge: have.edge, along: along, lon: foot.lon, lat: foot.lat, m: Math.sqrt(have.away) * 111320,
+                                    node: have.node, nodeM: have.nodeM};
+                });
+                return found;
             }
 
             // How far a position lies from a run of coordinates, in metres. It
@@ -4657,6 +4748,7 @@
 
             function snapped(graph, lat, lon, within) {
                 var reach = within === undefined ? PLAN.snapM : within;
+                if (kayak() && waterRoles(graph)) { return roleSnapped(graph, lat, lon, reach); }
                 var node = graph.nearestNode(lat, lon, reach);
                 // The nearest node may belong only to water and its portage
                 // ties. Skipping water edges alone would still snap to it.
@@ -4678,6 +4770,42 @@
                 }
                 if (line) { return {lat: line.lat, lon: line.lon, node: -1, edge: line.edge, along: line.along}; }
                 return {lat: lat, lon: lon, node: -1};
+            }
+
+            // **A kayak tap near the bank means the line off the bank**
+            // (kayak-offset-phases.md §4.3), on a graph whose paddled lines say
+            // what they are for. The travel line lies about `d` = 15 m out, so
+            // a finger at z17 (6 m) on the bank would find nothing and a finger
+            // at z15 would find the landing first. The travel line is therefore
+            // searched within `PLAN.waterSnapM` (d + 2.1 m) at least, capped at
+            // `snapM`, and inside that band it is taken before open water:
+            // open water there is an interface or a cap that ends on the bank.
+            // Beyond the band the nearest water wins as before, so a tap out on
+            // the lake takes the chord it lands on. A stream competes by
+            // distance: a tap on a river is a river tap.
+            //
+            // **Land keeps its own reach and wins when it is at least as near**
+            // as the water, so a start on a road or a launch is not moved into
+            // the lake. An exact position (`SAME_SPOT_M`) is not a finger: it
+            // gets no wider reach and no preference, only the line it stands
+            // on. With nothing in reach the point stays where it was put and
+            // reaches the network by its own connector.
+            function roleSnapped(graph, lat, lon, reach) {
+                if (!graph.header.edges) { return {lat: lat, lon: lon, node: -1}; }
+                var exact = reach <= SAME_SPOT_M;
+                var band = Math.min(PLAN.snapM, PLAN.waterSnapM);
+                var found = nearestByRole(graph, lat, lon, reach, exact ? reach : Math.max(reach, band));
+                function nearer(a, b) { return !a ? b : (!b || a.m <= b.m ? a : b); }
+                var water = !exact && found.travel && found.travel.m <= band
+                    ? nearer(found.travel, found.stream)
+                    : nearer(nearer(found.travel, found.stream), found.open);
+                var chosen = found.land && (!water || found.land.m <= water.m) ? found.land : water;
+                if (!chosen) { return {lat: lat, lon: lon, node: -1}; }
+                // At a junction the line is the node, as in `snapped`.
+                if (chosen.node >= 0 && chosen.nodeM <= chosen.m + NODE_FIRST_M) {
+                    return {lat: graph.nodeLat[chosen.node], lon: graph.nodeLon[chosen.node], node: chosen.node};
+                }
+                return {lat: chosen.lat, lon: chosen.lon, node: -1, edge: chosen.edge, along: chosen.along};
             }
 
             // **A tap means the line it lands on, and landing on it is

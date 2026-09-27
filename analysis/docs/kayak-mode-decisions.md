@@ -100,11 +100,12 @@ would draw it without a change.
 - **Lomsdal-Visten has no stream edges at all** — not a defect: N50's `vannbredde` codes
   were never matched to Topografi 50's class 2 (above), so Norway's streams stayed out.
 - **The line off the bank — approved 2026-09-25, started 2026-09-26.** Planned in
-  `kayak-offset-phases.md`, phases 12a–12h; decided below under §5. Open for 12f: how
-  the offshore snapping composes with phase 11's d + 250 m interior entries (that
-  plan's §4.3). Per-leg modes follow this line.
+  `kayak-offset-phases.md`, phases 12a–12h; decided below under §5. Phase 12f (review's decision):
+  Landing water is entered only at its ends; the other new lines are entries like any edge. Per-leg modes follow this line.
 
 ## 5. Changes
+
+- 2026-09-27 — phase 12f: a kayak tap near the bank takes the line off the bank (d + 2.1 m reach, travel before open water in that band, land kept when as near), and a raw point enters no Landing water in its middle. On Abisko with the switch on 960 of 960 comparisons equal the extended reference and kayak p95 is 425.65 / 418.30 ms (budget 525.45 / 528.08); switch off, graph and answers are main's. Not yet switched on; 12g does that per map.
 
 - 2026-09-26 — phase 12a: the offset line's baseline is frozen from main `6de243c` without a rebuild, and the 10 / 15 / 20 m comparison on twelve source patches finds no reason to leave 15 m. Records and scratch only; the figures are under "The line off the bank" below.
 
@@ -249,6 +250,9 @@ under the 3× line); the faster noding alone leaves every graph byte for byte as
 noding fast it would save at most 32.4 s and needs a second copy of the graph build's contact and
 bridge rules, so by the brief's own rule 12e's flow stays. Uwe asked for (c); this is the one place
 the phase departs from it, and the plan's 12e-2 note gives the figures.
+
+**Uwe on 12e-2, 2026-09-27.** (c) stays unbuilt. Verbatim: *"Ja passt das nicht umgesetzt wurde."*
+("Yes, it's fine that it was not built.") Then: *"Weiter mit 12f"*.
 
 ### Phase 11 — Enter an edge in its middle, 2026-09-25
 

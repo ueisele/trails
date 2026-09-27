@@ -121,7 +121,7 @@ from trails.io.sources import (
     traktorvegsti,
     ut,
 )
-from trails.network import graphs, norway, sweden
+from trails.network import graphs, norway, paddle_geometry, sweden
 from trails.network.norway import (
     FERRIES,
     FKB,
@@ -2163,6 +2163,10 @@ def plan_settings(params: graphs.Params, layers: list[TrailLayer], heights: dict
         "ascentThresholdM": params.ascent_threshold_m,
         "snapM": SNAP_M,
         "snapPx": SNAP_PX,
+        # The line off the bank lies d out and within the contour's deviation of it, so
+        # a finger on the bank at any zoom still finds it (kayak-offset-phases.md §4.3).
+        # Read only on a graph whose paddled sources carry a role.
+        "waterSnapM": paddle_geometry.PADDLE_OFFSET_M + paddle_geometry.CONTOUR_DEVIATION_M,
         "maxStraightM": MAX_STRAIGHT_M,
         "offPathFactor": OFF_PATH_FACTOR,
         "waterFactor": WATER_FACTOR,

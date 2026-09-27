@@ -1319,6 +1319,9 @@ as (c) is not built.
 changes speed but not a byte; the spur rule's reach (the node tolerance, 0.01 m). Malingsbo-Kloten and
 Lomsdal-Visten stay for 12g, and their dead-end counts with them.
 
+**Uwe on 12e-2, 2026-09-27:** that (c) stays unbuilt is fine. Verbatim: *"Ja passt das nicht umgesetzt
+wurde."* ("Yes, it's fine that it was not built.") With it he started 12f: *"Weiter mit 12f"*.
+
 ### Phase 12f — The tap, the line and the figures
 
 *Files:* `libs/src/trails/visualization/js/plan_mode.js` snapping/pricing/tally regions,
@@ -1345,6 +1348,107 @@ small synthetic browser fixtures first; real production drives follow per map.
 *Review and stop:* stop on bank-spur snapping, raw-point movement outside the existing
 rules, changed phase-10 pricing/grid sampling or a differential mismatch. Verify full
 suite isolation; a reading that only passes under `--only` is not ready.
+
+*Uwe said "Weiter mit 12f" on 2026-09-27.* **Review's decisions, taken before the phase (not Uwe's):**
+
+1. Snapping follows §4.3 as written: an ordinary water tap near the bank snaps to Shore or Narrow water,
+   whose candidates reach at least d + 2.1 m (17.1 m), capped by `snapM`; Landing water and bank anchors
+   are no ordinary water candidates; streams stay snappable; open water stays for deliberate open-lake
+   taps and as fallback; land keeps its radius, and a deliberate land feature, launch, landing or explicit
+   position keeps its meaning; with no travel line in reach the raw point stays raw.
+2. Phase 11's interior entries skip Landing water segments; their end nodes stay candidates, as all nodes
+   do. Shore, Narrow water and Open water take part like any eligible edge, within d + 250 m.
+3. A graph without roles behaves exactly as today; every new path is gated on the graph carrying roles.
+
+**Done 2026-09-27 — 12f: a kayak tap near the bank takes the line off the bank, a raw point enters no
+landing in its middle, and the figures count every piece once; on Abisko with the switch on, 960 of 960
+comparisons equal the extended reference and kayak p95 is 425.65 / 418.30 ms against 525.45 / 528.08.**
+With the switch off, Abisko's graph is main's byte for byte and its 960 answers equal 12a's frozen labels
+exactly. Evidence, scripts and logs: `~/mockups/kayak-mode/offset-plan/phase-12f/` (`README.md` first).
+No push, publication, tile build or cache write; the pages built are scratch.
+
+*The cache key.* No change: it cannot mix the two. `graphs.build` is the only path that reads or writes a
+cached graph, and `sweden.build` and `norway.build` send every source list holding paddled or directed
+water to `water.build`, which never caches. A build with no paddled water takes the cached path, and there
+the switch changes nothing, so both settings are the same graph under the same key. Every switch-off key,
+and every cached main graph, is therefore unchanged.
+
+*What changed.* `js/plan_mode.js`: `waterRoles`, `nearestByRole` and `roleSnapped`, taken by `snapped`
+only in a kayak on a graph with roles; `entryGeometry` marks Landing water in the same case and
+`entrySegments` skips it, so `d` is measured to the lines that remain. `maps.py` and `lomsdal_visten.py`:
+the plan setting `waterSnapM`, `PADDLE_OFFSET_M + CONTOUR_DEVIATION_M` = 17.1 m. `kayak_reference.js`: the
+reference skips a Landing water segment in a kayak, read off the header's role, not the page's table.
+`test_kayak_routing.py`: eight tests on a synthetic bank, two islands, a channel and a stream, and a
+seeded differential with roles. `drive_map.py`: `OffsetTaps` on the scene (Abisko's fixed taps), two
+readings, `the tap takes the line off the bank` and `the line off the bank is counted once`, which skip
+with their reason on a page without roles (listed among each scene's skips until 12g), and the drive probe
+records the landings a route uses.
+
+*How the tap is decided — implementation choices, not Uwe's or review's.* Each kind is searched within
+its own reach: land (every way, carry and launch), travel, stream, open. Inside the band of d + 2.1 m round
+a travel line the travel line is taken before open water (interfaces and caps end on the bank there); a
+stream competes with it by distance. Beyond the band the nearest water wins as before, so a tap out on the
+lake takes the chord under it. Land wins when it is at least as near as that water. The junction rule
+(`NODE_FIRST_M`, 2 m) is applied per kind, so a tap can move up to 2 m beyond the band onto a travel node.
+An exact position (`SAME_SPOT_M`, a goal's stop, a place) gets no widened reach and no preference, only the
+line it stands on, and never a landing. Walking and graphs without roles keep the old code path. A tap
+within a finger of a launch's bank end takes the launch there (land nearer than water); the launch's bank
+end is also the landing's, but it is chosen as the launch — for review.
+
+*Prices and bounds.* Nothing in the router changed. The new sources are PADDLE with land 0 and cost length
+× factor; floors use only connector metres (`cheapestMetre`, Open water by name) and network land, which
+the new sources do not lower, so every bound stays admissible. The synthetic tests price every role whole
+and in part (12e's test) and the seeded differential compares 64 role cases with the reference; with the
+landing skip taken out of production alone it finds 12 mismatches.
+
+*Synthetic readings (Node, `test_kayak_routing.py`).* A bank tap at a 6 m finger lands on Shore 14 m out;
+beside a bank anchor and beside an open link it lands on the Shore line's node; 17.5 m from the line it
+stays raw; a launch's bank end is kept; a road 2 m away keeps a tap whose Shore line is 43 m off, and a road 18 m away beats Shore 27 m away;
+a chord takes a tap 100 m out at z15 and z12, a tap with nothing in reach stays raw; an exact point stays raw beside
+Shore and on a landing, and is found on Shore; each island's tap takes its own line; a channel's tap takes
+its middle; a stream tap stays on the stream, leaving downstream only; walking never snaps to water; a
+graph without roles still snaps to a landing. A raw point 0.5 m from a landing has `d` = 9 m and no
+landing among its entries, equal to the reference.
+
+*Abisko, switch on* (page `59681c7a…`, 116,605 edges, as 12e-2). Fixed taps on Torneträsk by Abisko,
+chosen by `choose_taps.py`: `the tap takes the line off the bank` (104 readings) and `the line off the
+bank is counted once` (60) pass twice, 169 readings in each run with the page's own. At z17 (finger 5.3 m) and z15 (21.1 m):
+bank taps land on Shore 13.10 and 12.72 m out, 14.63 and 14.20 m from the source bank; the narrow tap on
+Narrow water 2.68 m out, 4.15 m from its bank and 5.64 m from the far one (0.74 m off the middle); the
+path and launch taps stay on land; the open-water tap stays raw (nearest travel line 105 m); the island
+tap takes its own line (13.05 m; the next is 19.0 m); the stream tap stays on the one-way stream; walking
+takes no water. Along the lake: 591.22 m, all paddled (Shore 538.30, Open water 52.93), on the lake's
+plane; from the launch: 230.83 m paddled (Landing water 16.36, once) and 7.70 m on foot. Panel, profile,
+drawn parts and both files agree with those totals in both Stay-on-paths settings.
+
+*Harness* (phase 11's Abisko sample: 200 pairs and 40 radius starts, four settings, 960 comparisons). A
+stored endpoint that was attached is found again on the new graph at `SAME_SPOT_M`, as a goal's stop is;
+a raw one stays raw — 164 attached and 1,756 raw endpoints on, 306 and 1,614 off (142 stood on the old
+bank line). Switch on: 0 mismatches, largest error 2.91 × 10⁻¹¹. Entry candidates on the 864 raw kayak
+endpoints: 97,088 segments with landings offered, 96,188 skipped (−900, −0.93 %; median 68 → 67, max
+1,351 → 1,345); no `d` moved. Timing, the 200 phase-10 pairs after four warm-ups, Firefox 153:
+
+| Kayak p95, ms | Landings skipped (built) | Landings offered | Budget |
+|---|---:|---:|---:|
+| Stay on paths off | 425.65 (p50 54, max 668) | 409.20 | 525.45 |
+| Stay on paths on | 418.30 (p50 55, max 700) | 437.30 | 528.08 |
+
+The two variants give the same answer on all 400 pairs; the difference in p95 is within run-to-run noise.
+
+*Switch off.* Graph header and data byte-identical to main's page. The harness with the stored
+attachments: 960 of 960 equal to the reference (largest error 2.91 × 10⁻¹¹) and to 12a's frozen labels
+exactly (largest difference 0). The phase-11 kayak and entry selection plus the two new readings
+(`only-off.txt`): 203 readings, twice green, the new ones skipped by the scene. `command make drive-all`
+once on that page: 1,633 readings, 0 broken, 0 moved, 6 skipped by the scene (phase 11: 1,638; the 5 fewer
+are per-frame readings of `the snap is drawn`, whose count follows the animation's frames, 75 against 80).
+
+*What 12g must know.* Each map needs its own `OffsetTaps` (chosen on its switch-on page;
+`choose_taps.py` is Abisko's) and the two readings taken out of its scene's skips when it is switched on.
+Taps must keep ways more than a z15 finger away (21 m at Abisko's latitude), or land wins, as the rule
+says. Abisko's island tap has its second line at 19.0 m, outside the band: a case with two travel lines
+inside 17.1 m was not found near the start and is covered only synthetically. The existing kayak scene
+figures were not read on the switch-on page; they move with the line and are 12g's. Malingsbo-Kloten and
+Lomsdal-Visten were not built.
 
 ### Phase 12g — One final map per run: Abisko, then MK, then Norway
 

@@ -3034,6 +3034,7 @@ PLAN_SETTINGS = (
     "ascentThresholdM",
     "snapM",
     "snapPx",
+    "waterSnapM",
     "maxStraightM",
     "offPathFactor",
     "waterFactor",
@@ -4488,7 +4489,10 @@ def add_plan_mode(fmap: folium.Map, plan: dict[str, Any], points: list[folium.Fe
             thing measured on the screen — a gesture snaps within whichever is
             the smaller, so that pinching in makes a tap mean the line under it
             and not a line a finger away, while a waypoint read out of a file
-            uses ``snapM`` alone and answers the same at every zoom; ``maxStraightM`` is how
+            uses ``snapM`` alone and answers the same at every zoom; ``waterSnapM`` is the
+            least reach of a kayak tap for the line off the bank, on a graph whose paddled
+            sources carry a role, where it is also the band in which that line is taken
+            before open water; ``maxStraightM`` is how
             far a leg may be drawn straight before it is refused, which bounds
             what one misclick can ask of a public service; ``offPathFactor``
             is what a metre of open ground costs against a metre of path, in

@@ -5437,6 +5437,7 @@ class TestPlanMode:
             # whichever is smaller, so a tap means the line under it rather than
             # one a finger away.
             "snapPx": 12,
+            "waterSnapM": 17.1,
             "maxStraightM": 20000.0,
             # What a metre of open ground costs against a metre of path, in the
             # currency the edge costs are in. Above the dearest factor any drawn

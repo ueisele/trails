@@ -49,6 +49,9 @@ def readings():
         "connectorBoxLand",
         "cheaper",
         "worthRouting",
+        "waterRoles",
+        "nearestByRole",
+        "roleSnapped",
         "cheapestMetre",
         "openWaterFactor",
         "edgeIndex",
@@ -74,8 +77,9 @@ def readings():
         function refresh() { refreshes++; }
         function refreshGoal() {}
         var CROSSING = 'ferry', CONNECTOR = 'bridge', PADDLE = 'paddle', PORTAGE = 'portage', LAUNCH = 'launch', NODE_FIRST_M = 2;
+        var SAME_SPOT_M = 1;
         var ENTRY_MARGIN = 250;
-        var PLAN = {portageFactor:4, offPathFactor:3, waterFactor:30, indexCellM:100, snapM:150, maxStraightM:50000};
+        var PLAN = {portageFactor:4, offPathFactor:3, waterFactor:30, indexCellM:100, snapM:150, waterSnapM:17.1, maxStraightM:50000};
         var MARKING = ['marked', 'unmarked', 'unknown'];
         var TALLIED = MARKING.concat(['undrawn', 'recorded', 'unrecorded']);
         function offPath() { return staying() ? 10 : PLAN.offPathFactor; }
@@ -441,6 +445,139 @@ def readings():
             out.offsetRoles.push(row);
         }
         paddle(true); stayOnPaths(false);
+        // Phase 12f: the tap and the entries where the line runs off the bank.
+        // Positions in metres; the page's metre is the index's here, so a node's
+        // distance and a line's agree.
+        const pagePanel=panel;
+        panel=()=>({metresBetween:(x,y,a,b)=>Math.hypot(x-a,y-b)*111320});
+        const M=1/111320, xy=(x,y)=>[x*M,y*M];
+        const roleSources=[{name:'Shore',kind:'paddle',factor:1,role:'travel'},
+            {name:'Narrow water',kind:'paddle',factor:1,role:'travel'},
+            {name:'Landing water',kind:'paddle',factor:1,role:'landing'},
+            {name:'Open water',kind:'paddle',factor:1.5,role:'open'},
+            {name:'Streams',kind:'paddle',factor:1,role:'stream'},
+            {name:'road',kind:'path',factor:1},{name:'launch',kind:'launch',factor:1}];
+        // A bank along y = 0, land below it; the Shore line 15 m out, cut where
+        // two landings meet it. Node 2 is a bank anchor with nothing else; node 4
+        // is where a launch from the road meets the bank; node 10 is the bank end
+        // of an open-water link. A chord runs out into the lake from node 0. A
+        // stream runs downhill from 12 to 13. Two islands' lines at y = 15 and
+        // y = 40 further east, and the middle of a 20 m channel beyond them.
+        const places=[xy(0,15),xy(400,15),xy(100,0),xy(100,15),xy(200,0),xy(200,15),xy(300,15),
+            xy(200,-20),xy(0,-30),xy(400,-30),xy(300,0),xy(400,215),xy(500,200),xy(500,15),
+            xy(1000,15),xy(1400,15),xy(1000,40),xy(1400,40),xy(2000,10),xy(2400,10)];
+        const roleEdges=[[0,3,0],[3,5,0],[5,6,0],[6,1,0],[2,3,2],[4,5,2],[7,4,6],[8,9,5],[10,6,3],[0,11,3],
+            [12,13,4],[14,15,0],[16,17,0],[18,19,1]];
+        function roleGraph(withRoles) {
+            const sources=withRoles?roleSources:roleSources.map(({role,...rest})=>rest);
+            const built=alternatives(sources,roleEdges,places);
+            built.oneWay=roleEdges.map((e,i)=>i===10?1:0);
+            built.roleOf=sources.map(s=>s.role||null);
+            built.nearestNode=(lat,lon,reach)=>{let best=-1,near=reach;
+                for(let n=0;n<places.length;n++){const m=panel().metresBetween(lon,lat,places[n][0],places[n][1]);if(m<near){near=m;best=n;}}
+                return best;};
+            return built;
+        }
+        g=roleGraph(true);
+        const tap=(x,y,reach)=>{const p=snapped(g,y*M,x*M,reach);
+            return {node:p.node,edge:p.edge===undefined?-1:p.edge,along:p.along,x:p.lon/M,y:p.lat/M};};
+        paddle(true); stayOnPaths(false); routing=null; gridded=null;
+        out.roleTaps={
+            nearBank:tap(150,1,6), besideAnchor:tap(101,1,24), atLaunch:tap(201,1,24), besideOpenLink:tap(300,2,24),
+            offshoreChord:tap(150,100,24), offshoreRaw:tap(300,60,24), offshoreFar:tap(150,100,150),
+            onRoad:tap(150,-28,24), landCloser:tap(150,-12,40), exactRaw:tap(150,1,1), exactOnLanding:tap(100,5,1),
+            exactOnShore:tap(150,15,1), beyondBand:tap(150,-2.5,6), islandA:tap(1200,1,24), islandB:tap(1200,54,24),
+            nearerB:tap(1200,28.5,24), narrow:tap(2200,2,6), stream:tap(501,100,24)};
+        const onStream={node:-1,edge:10,along:out.roleTaps.stream.along,lon:out.roleTaps.stream.x*M,lat:out.roleTaps.stream.y*M};
+        out.streamEnds={leaving:endsOf(g,onStream).map(e=>e.node),entering:endsOf(g,onStream,true).map(e=>e.node)};
+        out.roleWalking=[];
+        for(const staying of [false,true]) {
+            paddle(false); stayOnPaths(staying); routing=null;
+            const near=tap(150,1,24),far=tap(150,1,150);
+            out.roleWalking.push({near,far,farKind:far.edge>=0?g.header.sources[g.sources[far.edge]].kind:null,
+                snapKinds:far.node>=0?g.fromNode.map((f,i)=>f===far.node||g.toNode[i]===far.node?
+                    g.header.sources[g.sources[i]].kind:null).filter(Boolean):[]});
+        }
+        paddle(true); stayOnPaths(false);
+        g=roleGraph(false); routing=null; gridded=null;
+        out.roleless={roles:waterRoles(g),onLanding:tap(100,5,24)};
+        // Entries: a raw point beside a landing enters no landing's middle, and
+        // its d is measured to the lines that remain.
+        g=roleGraph(true); routing=null; gridded=null;
+        {
+            const spec={west:-0.01,south:-0.01,dLon:0.00005,dLat:0.00005,cols:1000,rows:1000};
+            const stride=(spec.cols+7)>>3,bits=new Uint8Array(stride*spec.rows);
+            for(let y=0;y<spec.rows;y++)for(let x=0;x<spec.cols;x++) {
+                const lat=spec.south+(y+0.5)*spec.dLat;
+                if(lat>0)bits[y*stride+(x>>3)]|=0x80>>(x&7);
+            }
+            g.water={spec,stride,bits,cellM:5};
+            g.waterAt=(lon,lat)=>{const x=Math.floor((lon-spec.west)/spec.dLon),y=Math.floor((lat-spec.south)/spec.dLat);
+                return x>=0&&y>=0&&x<spec.cols&&y<spec.rows&&!!(bits[y*stride+(x>>3)]&(0x80>>(x&7)));};
+        }
+        out.roleEntries=[];
+        for(const staying of [false,true]) {
+            stayOnPaths(staying); routing=null;
+            const beside={node:-1,lon:100.5*M,lat:6*M},target={node:1,lon:places[1][0],lat:places[1][1]};
+            const entries=middleEntries(g,beside,false);
+            const chosen=joinedRoute(g,beside,target);
+            out.roleEntries.push({staying,nearest:nearestEntryDistance(g,entryContext(g,beside)),
+                edges:Object.keys(entries.byEdge).map(Number),actual:chosenLabel(g,beside,target,chosen),
+                expected:referenceJoined(g,beside,target),referenceEdges:[...new Set(referenceMiddle(g,beside,false).map(p=>p.edge))]});
+        }
+        stayOnPaths(false);
+        // The seeded differential again, on graphs whose paddled lines carry
+        // roles, landings among them: the reference reads the role off the
+        // header and shares none of production's candidates or pruning.
+        seed=20260927;
+        out.roleDifferential=[];
+        for(let terrain=0;terrain<4;terrain++) {
+            const nodes=Array.from({length:12},()=>[random()*0.01,random()*0.01]);
+            const sources=[{name:'Open water',kind:'paddle',factor:1.5,role:'open'},
+                {name:'Shore',kind:'paddle',factor:1,role:'travel'},{name:'Landing water',kind:'paddle',factor:1,role:'landing'},
+                {name:'Streams',kind:'paddle',factor:1,role:'stream'},{name:'path',kind:'path',factor:1},
+                {name:'carry',kind:'portage',factor:3},{name:'launch',kind:'launch',factor:1}];
+            const arcs=Array.from({length:18},()=>[Math.floor(random()*10),Math.floor(random()*10),Math.floor(random()*sources.length)]);
+            arcs[2][2]=2; arcs[3][2]=2; arcs[4][2]=4;
+            g=alternatives(sources,arcs,nodes);
+            g.roleOf=sources.map(s=>s.role||null);
+            g.oneWay=arcs.map(a=>a[2]===3?1:0);
+            g.water.cellM=10;
+            const spec={west:-0.01,south:-0.01,dLon:0.0001,dLat:0.0001,cols:300,rows:300};
+            g.water.spec=spec;
+            const stride=(spec.cols+7)>>3,bits=new Uint8Array(stride*spec.rows);
+            for(let y=0;y<spec.rows;y++)for(let x=0;x<spec.cols;x++) {
+                const wet=terrain===0||terrain===2&&(x<130||x>160||y>170)||terrain===3&&((x%23)<8||(y%31)<9);
+                if(wet)bits[y*stride+(x>>3)]|=0x80>>(x&7);
+            }
+            g.water.stride=stride;g.water.bits=bits;
+            g.waterAt=(lon,lat)=>{
+                const x=Math.floor((lon-spec.west)/spec.dLon),y=Math.floor((lat-spec.south)/spec.dLat);
+                return x>=0&&y>=0&&x<spec.cols&&y<spec.rows&&!!(bits[y*stride+(x>>3)]&(0x80>>(x&7)));
+            };
+            for(let pair=0;pair<8;pair++) {
+                let from={node:-1,lon:random()*0.014-0.002,lat:random()*0.014-0.002};
+                let to={node:-1,lon:random()*0.014-0.002,lat:random()*0.014-0.002};
+                if(pair%4===1)from={node:Math.floor(random()*nodes.length)};
+                if(pair%4===2) {
+                    // Beside a landing, so its middle is the nearest line.
+                    const edge=2,ratio=0.2+random()*0.6,a=g.fromNode[edge],b=g.toNode[edge];
+                    to={node:-1,lon:nodes[a][0]+ratio*(nodes[b][0]-nodes[a][0])+0.00003,
+                        lat:nodes[a][1]+ratio*(nodes[b][1]-nodes[a][1])+0.00003};
+                }
+                for(const p of [from,to])if(p.node>=0){p.lon=g.nodeLon[p.node];p.lat=g.nodeLat[p.node];}
+                if(pair>=4)[from,to]=[to,from];
+                for(const staying of [false,true]) {
+                    stayOnPaths(staying);
+                    const chosen=joinedRoute(g,from,to),actual=chosenLabel(g,from,to,chosen);
+                    const expected=referenceJoined(g,from,to);
+                    out.roleDifferential.push({terrain,pair,staying,actual,expected});
+                }
+            }
+        }
+        stayOnPaths(false);
+        panel=pagePanel;
+        paddle(true); stayOnPaths(false);
         console.log(JSON.stringify(out));
     """
     )
@@ -705,6 +842,7 @@ def test_kloten_interior_entries_match_the_virtual_table_and_attached_rows_stay_
         "connectorBoxLand",
         "cheaper",
         "worthRouting",
+        "waterRoles",
         "cheapestMetre",
         "openWaterFactor",
         "edgeIndex",
@@ -810,3 +948,85 @@ def test_walking_neither_routes_nor_snaps_to_any_source_of_the_line_off_the_bank
             assert walk["line"] is None
             assert walk["tap"]["node"] == -1
             assert "edge" not in walk["tap"]
+
+
+def _raw(tap, x, y):
+    return tap["node"] == -1 and tap["edge"] == -1 and (tap["x"], tap["y"]) == pytest.approx((x, y))
+
+
+def test_a_kayak_tap_near_the_bank_takes_the_line_off_the_bank(readings):
+    taps = readings["roleTaps"]
+    # z17's 6 m finger on the bank still reaches the Shore line 14 m out.
+    assert taps["nearBank"]["edge"] == 1
+    assert taps["nearBank"]["y"] == pytest.approx(15)
+    # Beside a bank anchor and its landing, and beside an open-water link that ends
+    # on the bank: the travel line, never the landing, the anchor or the link.
+    assert taps["besideAnchor"]["node"] == 3
+    assert taps["besideOpenLink"]["node"] == 6
+    # Past d + 2.1 m of the line and with no land in reach, the point stays where it was put.
+    assert _raw(taps["beyondBand"], 150, -2.5)
+
+
+def test_a_kayak_tap_keeps_land_launches_and_open_water(readings):
+    taps = readings["roleTaps"]
+    # The launch's bank end is land (the launch), nearer than the line: the start stays there.
+    assert taps["atLaunch"]["node"] == 4
+    assert taps["onRoad"]["edge"] == 7
+    assert taps["landCloser"]["edge"] == 7
+    # Out on the lake the chord under the finger, at z15 and at z12 alike.
+    assert taps["offshoreChord"]["edge"] == taps["offshoreFar"]["edge"] == 9
+    assert _raw(taps["offshoreRaw"], 300, 60)
+
+
+def test_an_exact_position_is_not_a_finger(readings):
+    taps = readings["roleTaps"]
+    assert _raw(taps["exactRaw"], 150, 1)
+    assert _raw(taps["exactOnLanding"], 100, 5)
+    assert taps["exactOnShore"]["edge"] == 1
+    assert taps["exactOnShore"]["y"] == pytest.approx(15)
+
+
+def test_a_kayak_tap_takes_its_own_island_and_the_middle_of_a_channel(readings):
+    taps = readings["roleTaps"]
+    assert taps["islandA"]["edge"] == 11
+    assert taps["islandB"]["edge"] == 12
+    assert taps["nearerB"]["edge"] == 12
+    assert taps["narrow"]["edge"] == 13
+    assert taps["narrow"]["y"] == pytest.approx(10)
+
+
+def test_a_tap_on_a_stream_stays_on_it_and_keeps_its_direction(readings):
+    tap = readings["roleTaps"]["stream"]
+    assert tap["edge"] == 10
+    assert tap["along"] == pytest.approx(100)
+    assert readings["streamEnds"] == {"leaving": [13], "entering": [12]}
+
+
+def test_walking_and_a_graph_without_roles_snap_as_before(readings):
+    for walk in readings["roleWalking"]:
+        assert _raw(walk["near"], 150, 1)
+        assert walk["far"]["edge"] == 7
+        assert walk["farKind"] == "path"
+    assert readings["roleless"]["roles"] is False
+    # Without roles every paddled line is a line to snap to, the landing included.
+    assert readings["roleless"]["onLanding"]["edge"] == 4
+
+
+def test_a_raw_kayak_point_enters_no_landing_in_its_middle(readings):
+    for row in readings["roleEntries"]:
+        # d is measured to the Shore line 9 m away, not to the landing 0.5 m away.
+        assert row["nearest"] == pytest.approx(9)
+        assert not {4, 5} & set(row["edges"])
+        assert sorted(row["edges"]) == sorted(row["referenceEdges"])
+        for label in ("land", "cost"):
+            assert row["actual"][label] == pytest.approx(row["expected"][label], abs=1e-8, rel=1e-12)
+
+
+def test_seeded_joined_search_with_roles_matches_the_unpruned_reference(readings):
+    rows = readings["roleDifferential"]
+    assert len(rows) == 64
+    assert any(row["expected"]["edges"] for row in rows)
+    for row in rows:
+        for label in ("land", "cost"):
+            expected = row["expected"][label]
+            assert abs(row["actual"][label] - expected) <= 1e-8 + 1e-12 * abs(expected), row

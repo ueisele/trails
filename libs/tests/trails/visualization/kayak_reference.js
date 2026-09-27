@@ -40,6 +40,9 @@ function referenceSegments(graph, point) {
     }
     for (let e = 0; e < graph.header.edges; e++) {
         if (!Number.isFinite(w.cost[e]) || !w.length[e]) continue;
+        // Phase 12f: a kayak enters a Landing water line only at its ends,
+        // read here off the header's role, not off the page's decoded table.
+        if (kayak() && graph.header.sources[graph.sources[e]].role === 'landing') continue;
         let along = 0;
         for (let v = graph.vertexAt[e]; v + 1 < graph.vertexAt[e + 1]; v++) {
             const a = [graph.coordinates[2 * v], graph.coordinates[2 * v+1]];
