@@ -697,6 +697,134 @@ fixture shows that a skeleton cannot reopen a cut.
 required branch, unstable medial construction, new dependency burden or memory excess.
 If algorithmic work is incomplete, split this phase before beginning access integration.
 
+**Done 2026-09-27 — the middle runs wherever the offset cannot, on the patches and all three
+maps, and every gate holds; nothing uses it yet.** `paddle_geometry.contours` now also returns
+the centre network: `centre` (pieces, all Narrow water, each with why it is kept), `nodes`
+(joins, junctions, ends, anchor nodes), `pruned` and `anchors`. Its tests are in
+`test_paddle_geometry.py`. No module outside those two files imports `paddle_geometry`, so
+production output cannot change; no graph, page, tile or browser run, no new dependency.
+Evidence, scripts, input hashes and resource figures are in scratch,
+`~/mockups/kayak-mode/offset-plan/phase-12c/` (`README.md` first).
+
+*What it draws.* The middle is the medial axis of each body's water where its radius is under
+d, built near closed-off water, near places where the contour's nearest bank jumps across at
+least 20 m of bank or between two rings, near access anchors, and through vanished bodies
+whole. It meets the contour exactly where its radius reaches d; that point is inserted into
+the raw contour and pinned, so both lines share the vertex once written. Kept, per the brief:
+every path between joins and every loop (passage, loop), the longest way of a vanished body,
+a branch whose longest way from where it hangs is at least 30 m and the branches off it judged
+the same way (bay), and the way to every anchor's branch (anchor). Everything else is pruned
+and listed. Closed-off water the kept network runs into, or whose anchor's branch is kept, is
+kept closed-off water; its cap pieces are **Open water where the nearest bank point jumps
+inside the cap from one shoulder to another**, and Shore where one shoulder holds the whole
+cap (the arc round an island's corner beside a straight bank).
+
+*Construction — implementation choices, not Uwe's.* The Voronoi diagram of the bank sampled at
+most every metre, symmetrically about each vertex, built from GEOS's Delaunay triangles in 1 km
+tiles; ribs between neighbouring samples dropped; each edge clipped at the **exact** radius d
+(the samples' overstatement is measured at the edge's ends and interpolated); every kept edge
+checked for an empty circle (GEOS triangulates exactly collinear samples into flat triangles
+whose 2.8·10¹⁰ m circles pass for empty, and the bisector of two samples nine apart then crossed
+an Abisko river); local halving of the step round any kept node off the middle (up to 7 times)
+and round edges cut at the water's edge, a pinch finer than a step (up to 3 times); corner
+branches run on into their convex corner (the sampled branch stops 0.7 of a step short); joins
+more than 0.1 m and up to 2 m off the contour reach it by a straight transition; ends farther
+off are no joins and are tied through the speck of offset beside them or across to the other
+piece of the middle within 2 m; an anchor keeps the branch its bank faces (the edges its three
+nearest bank samples generate) unless a kept line's disc already reaches it within 1 m.
+Simplification is Douglas–Peucker where each raw vertex moves by what the middle gate leaves
+it, less the page grid's move; the written line is proved against the gate as in 12b.
+
+*Whole maps, geometry only* — the 15 m contour and the centre network, no spurs, chords or
+noding; not graph or page figures:
+
+| | Abisko | Malingsbo-Kloten | Lomsdal-Visten |
+|---|---:|---:|---:|
+| Contour 2 m vertices (12b's) | 38,427 (34,280) | 96,717 (89,905) | 141,544 (127,823) |
+| Centre vertices: raw / plain 2 m / delivered | 439,415 / 15,261 / 25,259 | 503,385 / 22,695 / 39,347 | 432,607 / 25,538 / 50,111 |
+| Centre km (of it transitions outside closed-off water) | 239.8 (41.5) | 292.9 (68.7) | 290.7 (125.0) |
+| Kept km: passage / loop / vanished / bay / anchor | 152.8 / 12.4 / 11.7 / 51.9 / 11.2 | 165.6 / 5.5 / 6.3 / 89.3 / 26.2 | 97.5 / 0.4 / 0 / 153.4 / 39.4 |
+| Joins / junctions | 2,944 / 562 | 5,009 / 448 | 12,132 / 493 |
+| Pruned: bay branches / side branches (km of longest ways) | 10,540 (173.9) / 11,925 (107.7) | 30,396 (506.8) / 19,854 (168.0) | 64,914 (1,081.8) / 30,654 (260.0) |
+| Kept closed-off water (12b's caps) | 1,783 (1,290) | 3,396 (2,530) | 8,089 (4,564) |
+| Cap pieces Open water / Shore; Open water km | 960 / 1,311; 6.94 | 1,927 / 2,037; 14.58 | 3,266 / 3,813; 24.35 |
+| Anchors in closed-off water / kept | 2,788 / 2,787 | 5,816 / 5,816 | 4,280 / 4,280 |
+| Proxy Brotli B (12a's method): contour + centre | 232,000 + 150,887 = 379,640 | 608,774 + 234,872 = 838,099 | 889,016 + 307,177 = 1,182,479 |
+| Wall s (of it centre) / peak RSS MB, 4 GiB cap | 326 (185) / 699 | 401 (157) / 588 | 4,292 (2,971) / 1,864 |
+
+The pruned branches are almost all corner branches under 30 m; the largest pruned are 29.96,
+29.99 and 30.00 m (Abisko 18.964875 68.279803, Malingsbo-Kloten 15.075951 60.057385,
+Lomsdal-Visten 12.932278 65.670543, longest way just short of 30 m to rounding). Kept closed-off
+water grows over 12b's caps by the passages and loops under 30 m of reach, which 12b smoothed
+over, and by bays whose branch reaches 30 m from its join though their water reaches less.
+The contour gains 4,147 / 6,812 / 13,721 vertices over 12b's, from the pinned joins and the
+cuts at the new caps.
+
+*Against the §1.7 budgets, geometry only.* Page: contour plus centre proxy less the 5 m bank
+proxy the plan measured (190,252 / 418,282 B) is +189,388 / +419,817 B for Abisko /
+Malingsbo-Kloten, of +0.5 / +1.0 MB; Lomsdal-Visten's has no measured bank proxy, and all of its
+1,182,479 B is under +1.5 MB. Vertices: contour plus centre less the 5 m bank's 28,604 / 62,387
+is +35,082 / +73,677 against +128,778 / +490,135 allowed; Lomsdal-Visten's 191,655 whole
+against +650,720. Spurs, chords and noding come on top in 12d and 12e.
+
+*The gates.* Middle: every kept raw vertex within min(1 m, 10 % of width) of the true middle,
+measured against the exact bank segments on both sides (worst raw 0.25 / 0.25 / 0.36 m, largest
+share of width 0.0976 / 0.0946 / 0.0971 held). Where the gate leaves less than 1.5 grid moves,
+about 1.2 m of water and less (1,995 / 2,994 / 5,974 vertices), it is held before encoding and
+the grid adds at most 0.058 / 0.064 / 0.060 m. Labelled cross sections (straight, bend,
+island), where the banks are opposing, measured from the written line along the gradient of
+the two banks' distances: 5,504 of 5,504 within the gate on the patches and fixtures (worst
+0.91 m at 20.5 m of water), 3,089 of 3,089 and 3,108 of 3,108 on the whole of Abisko and
+Malingsbo-Kloten. Lomsdal-Visten's whole map was measured by a chord's midpoint, which is off
+the true middle wherever the banks are not in line: 3 of 3,224 failed, where the banks were
+144–169 degrees apart by their widths and errors, and all 95 sections round those three places
+pass on 300 m halo patches the final way. Containment: no dry length before encoding; after
+it 25.89 / 46.13 / 82.70 m dry in all, never more than 0.061 m out, all at bank ends or
+grid-narrow water, as the plan allows. No segment enters a dam disc (least 25.0001 m). Stability: at half the step every patch has the
+same number of joins and of junctions, each matched both ways within 0.145 m against
+min(1 m, 10 % of width). Tiles: of
+4,618 / 8,579 / 12,739 edges computed on both sides of a border, 1 / 6 / 8 differ, by at most
+0.5 / 16.8 / 2.7 mm at a clip point, and 2 in Lomsdal-Visten have no counterpart.
+
+*The witnesses*, on real data, with crop and dam cuts counted apart. Through travel: every
+passage and every loop beside an island joins all the contour parts it lies between through
+its own middle (671 / 765 / 1,269 witnessed; one Lomsdal-Visten loop at 12.449706 65.857187
+leaves the map 40 m away and was not seen as cut by the whole-map run). Islands: every island
+lies alone in a face of the network (662 / 1,201 / 1,755; the rest cut by the map). Bays:
+every kept bay reaches a join (1,055 / 2,453 / 4,889). Vanished bodies: all 8 in Abisko and
+2 of 3 in Malingsbo-Kloten are one piece of centre line end to end; the third is cut by its
+dam. Synthetic graph fixtures in the tests show a through narrow, both ways round an island,
+a 30.32 m bay kept against a 19.80 m one pruned, a 6 m bay kept for its anchor, a vanished
+body crossed, a dam that the middle does not reopen, a gap 5 cm under 2d kept, a river joined
+through a 6 cm pinch, and identical lines at half the step and in 60 m tiles.
+
+*12b's three grid contacts.* At both in Lomsdal-Visten the water is within 0.03 m of 2d wide
+(the reported points lie 15.013 and 14.968 m from the bank) and the middle now runs through
+(0.05 and 0.14 m away); the nearest contour pieces there now meet (0.0 m apart) and the first
+two no longer cross once written, but a centre-to-contour contact is reported at each. Malingsbo-
+Kloten's at 15.306432 60.131638 remains: no middle is built there (the nearest is 100 m away),
+and two raw contour pieces 0.093 m apart still cross once written; 12e must node it.
+
+*What 12d must know.* The `anchors` frame maps each access anchor in closed-off water (12b's
+set) to the node of the branch it keeps; one Abisko anchor faces no branch. Every join is a
+pinned vertex of both lines; the 0.1–2 m transitions are Narrow water. `contact` lists the
+places where a centre piece and another line pass within 0.13 m and cross once written
+(56 / 40 / 90); no vertex undoes that, so 12e must node them.
+
+*The cost 12g inherits.* Lomsdal-Visten's sea, one body of 273,219 input vertices, took 3,903 s
+of the map's 4,292, its middle 2,814 s over three local halving rounds; that alone is beyond
+twice the map's whole baseline graph build (1,025 s), the plan's threshold for investigating.
+Each halving round rebuilds the whole body's graph and pruning, and pieces are validated one by
+one; on a profiled patch (Malingsbo-Kloten's stream join, 15.3 s) the middle took 5.2 s, the
+centre pieces 5.6 s (3.1 s of it validation) and the contour's validation 2.5 s. The sea was
+not profiled. Before 12g's full build the middle needs partitioning by body region or an
+incremental halving round.
+
+*For review.* The cap rule (kept closed-off water, Open water only where the nearest bank
+jumps between shoulders) and its growth over 12b's caps; the 2 m transition and tie reach; the
+1 m anchor disc; holding the middle gate before encoding where the grid leaves it no room; and
+the 20 m jump separation that decides where the construction looks at all.
+
 ### Phase 12d — Attach the last metres and preserve the barriers
 
 *Files:* `libs/src/trails/network/water.py`, `paddle_geometry.py`, the phase-10 launch module
