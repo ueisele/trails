@@ -29,8 +29,11 @@ halo of ``OFFSET_HALO_M`` round the map and replaces the bank-following sources:
 - **Stream directions** are decided on the earlier build's stream edges (phase
   7's gate sums per-edge falls, so a finer cut would move it) and carried to the
   new edges by chain; lake planes read the earlier build's bank samples.
+- **A spur leading nowhere is left out**: one whose bank end no other line of the
+  build reaches, the anchor's only land side having been a bridge between two banks
+  of one body or the crop (12e-2).
 
-Review's decisions of 2026-09-27 (not Uwe's) fixed the last three and the halo.
+Review's decisions of 2026-09-27 (not Uwe's) fixed the last four and the halo.
 """
 
 import time
@@ -64,6 +67,7 @@ from trails.network.water import (
     eligible_bodies,
 )
 from trails.routing.graph import DEFAULT_BRIDGE_COST_FACTOR, Network
+from trails.routing.noding import NODE_TOLERANCE_M
 from trails.routing.sources import BRIDGE, FERRY, LANDING, LAUNCH, OPEN, PADDLE, PATH, PORTAGE, STREAM, TRAVEL, NetworkSource
 
 #: The water feeding the contour is loaded this far beyond the map: the offset plus its deviation
@@ -522,6 +526,18 @@ def assemble(old: Network, sources: list[NetworkSource], access: Access, *, metr
             return rows
         return [{**row, "geometry": piece} for row in rows for piece in _outside_dams(row["geometry"], dam_tree)]
 
+    route_of = {int(found["node"].iloc[c]): str(r) for c, r in zip(landed.spurs["contact"], landed.spurs["route"], strict=True)}
+    bridges, bridge_counts = _bridges(old, start_of, body_of, route_of)
+    evidence["bridges"] = bridge_counts
+    kept: list[NetworkSource] = []
+    stream_source = None
+    for source in sources:
+        if source.kind == PADDLE:
+            if source.name == STREAMS:
+                stream_source = replace(source, role=STREAM)
+            continue
+        kept.append(_moved_ends(source, moved, metric_crs) if moved and source.kind in (LAUNCH, PORTAGE) else source)
+
     columns = [*OWNER_COLUMNS, "geometry"]
     open_water: list[dict[Any, Any]] = [
         *lines.loc[lines["source"] == OPEN_WATER, columns].to_dict("records"),
@@ -530,9 +546,20 @@ def assemble(old: Network, sources: list[NetworkSource], access: Access, *, metr
         *cut([{**owners, "geometry": seam} for found_seams in seams.values() for seam, owners in found_seams]),
         *({key: value for key, value in row.items() if key != "contact"} for row in open_rows),
     ]
+    shore = lines.loc[lines["source"] == SHORE, columns].to_dict("records")
+    narrow = centre[columns].to_dict("records")
+    # A spur whose bank end nothing else reaches, the anchor having no land side, stream or other
+    # water left (mostly a bridge between two banks of one body, dropped above), leads nowhere.
+    others = [
+        *(row["geometry"] for rows in (shore, narrow, open_water) for row in rows),
+        *bridges,
+        *streams,
+        *(line for source in kept for line in source.gdf.to_crs(metric_crs).geometry),
+    ]
+    landing_rows, evidence["dead-end spurs left out"] = _without_dead_ends(landing_rows, others)
     frames: dict[str, list[dict[Any, Any]]] = {
-        SHORE: lines.loc[lines["source"] == SHORE, columns].to_dict("records"),
-        NARROW_WATER: centre[columns].to_dict("records"),
+        SHORE: shore,
+        NARROW_WATER: narrow,
         LANDING_WATER: [{key: value for key, value in row.items() if key != "contact"} for row in landing_rows],
         OPEN_WATER: open_water,
     }
@@ -551,17 +578,6 @@ def assemble(old: Network, sources: list[NetworkSource], access: Access, *, metr
         )
         for name, rows in frames.items()
     ]
-    route_of = {int(found["node"].iloc[c]): str(r) for c, r in zip(landed.spurs["contact"], landed.spurs["route"], strict=True)}
-    bridges, bridge_counts = _bridges(old, start_of, body_of, route_of)
-    evidence["bridges"] = bridge_counts
-    kept: list[NetworkSource] = []
-    stream_source = None
-    for source in sources:
-        if source.kind == PADDLE:
-            if source.name == STREAMS:
-                stream_source = replace(source, role=STREAM)
-            continue
-        kept.append(_moved_ends(source, moved, metric_crs) if moved and source.kind in (LAUNCH, PORTAGE) else source)
     paddled.append(
         NetworkSource(
             BRIDGE,
@@ -684,6 +700,26 @@ def _without_duplicates(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]
         seen[(int(ends[0] // SAME_END_M), int(ends[1] // SAME_END_M))].append(ends)
         kept.append(row)
     return kept, dropped
+
+
+def _without_dead_ends(rows: list[dict[str, Any]], others: list[BaseGeometry]) -> tuple[list[dict[str, Any]], int]:
+    """Drop a contact's spur whose bank end no other line of the build reaches within the node tolerance.
+
+    Such an end would be a node of degree one after noding: nothing on land, no stream,
+    no other water. A stream mouth's join (``contact`` -1) starts on its stream and stays.
+    Another spur from the same point counts as a line reaching it, so both stay.
+    """
+    spurs = [index for index, row in enumerate(rows) if row["contact"] >= 0]
+    if not spurs:
+        return rows, 0
+    tips = shapely.points([shapely.get_coordinates(rows[index]["geometry"])[0] for index in spurs])
+    lines = np.asarray([*others, *(row["geometry"] for row in rows)], dtype=object)
+    near, found = shapely.STRtree(lines).query(tips, predicate="dwithin", distance=NODE_TOLERANCE_M)
+    own = np.asarray(spurs)[near] + len(others)
+    reached = np.zeros(len(spurs), dtype=bool)
+    reached[near[found != own]] = True
+    dead = {index for index, hit in zip(spurs, reached.tolist(), strict=True) if not hit}
+    return [row for index, row in enumerate(rows) if index not in dead], len(dead)
 
 
 def _bridges(

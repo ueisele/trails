@@ -1,8 +1,11 @@
 """Tests for cutting lines where they meet."""
 
 import geopandas as gpd
+import numpy as np
 import pytest
+import shapely
 from shapely.geometry import LineString, MultiLineString, Point, Polygon, box
+from shapely.ops import substring
 from trails.routing.noding import clip_lines, cut_line, cut_positions, intersection_points, project_onto, working_lines
 
 CRS = "EPSG:25833"
@@ -156,6 +159,32 @@ class TestCutLine:
     def test_a_cut_that_leaves_nothing_is_reported_as_nothing(self):
         """Test that the caller can tell an empty piece from a real one."""
         assert cut_line(LineString([(0, 0), (100, 0)]), [0.0, 50.0, 50.0, 100.0])[1] is None
+
+    def test_pieces_are_substring_s_coordinate_for_coordinate(self):
+        """Test that the running sum done once per line cuts exactly as shapely's substring does.
+
+        Random lines of every scale, some with a height and some returning to an
+        earlier vertex, cut at random and exactly at vertices.
+        """
+        rng = np.random.default_rng(12)
+        for _ in range(300):
+            count = int(rng.integers(2, 30))
+            xy = rng.normal(size=(count, 2)) * rng.choice([1e-3, 1.0, 1e5])
+            if rng.random() < 0.2:
+                xy[rng.integers(1, count)] = xy[0]
+            line = LineString(np.c_[xy, rng.normal(size=count)]) if rng.random() < 0.3 else LineString(xy)
+            if line.length == 0:
+                continue
+            vertices = np.r_[0, np.cumsum(np.hypot(*np.diff(xy, axis=0).T))][1:-1]
+            inner = {*rng.uniform(0, line.length, size=int(rng.integers(1, 10))).tolist(), *vertices[rng.random(len(vertices)) < 0.3].tolist()}
+            positions = [0.0, *sorted(value for value in inner if 0 < value < line.length), line.length]
+            for ours, start, end in zip(cut_line(line, positions), positions[:-1], positions[1:], strict=True):
+                theirs = substring(line, start, end)
+                if not isinstance(theirs, LineString) or theirs.length == 0:
+                    assert ours is None
+                    continue
+                assert ours is not None and ours.has_z == theirs.has_z
+                assert np.array_equal(shapely.get_coordinates(ours, include_z=ours.has_z), shapely.get_coordinates(theirs, include_z=theirs.has_z))
 
 
 class TestProjectOnto:

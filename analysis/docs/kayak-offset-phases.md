@@ -1223,6 +1223,102 @@ the 74 bridges dropped at a bank end without a spur; and the choices marked abov
 and Lomsdal-Visten were not built: 12g. Malingsbo-Kloten's stream directions are phase 7's by
 construction (the gate reads the first noding's edges) and by the tests, not yet by a build.
 
+**Uwe's decisions, 2026-09-27, on 12e's stop.** Verbatim: *"Ja mach c und erlaube 3x Dauer."*
+
+- **Option (c):** node the new water into the walking network once, instead of noding the whole
+  network twice. Today the build nodes main's whole network first. That graph is never shipped. It
+  only serves as a reference for contacts, bridges, stream decisions and lake planes. Then it nodes
+  everything again with the new water.
+- **Build-time allowance for the offset line:** the total graph build with the switch on may take up
+  to **3×** the baseline graph build of its map (161.8 / 388.0 / 1,025.4 s). Above that is a stop.
+  This replaces the plan's 1.5× aim / 2× stop for this line. Page Brotli, graph size and kayak p95
+  budgets are unchanged.
+
+**Review's decisions from the 12e report (not Uwe's).** Keep the role decoder in `routing_graph.js`
+in 12e: it is inert on a graph without roles, and the graph payload with the switch off is identical.
+Leave out the 1,566 dead-end Landing water spurs, whose anchor has no land side, no stream and no other
+water left (mostly the dropped bridges between two banks of one body), and report the count per map;
+a spur whose anchor keeps any land, stream or launch/portage side stays. Accept the 74 bridges dropped
+at the crop, as phase 9 treats crop ends. Accept the 12e implementation choices listed in its note.
+
+**Done 2026-09-27 — 12e-2: the dead-end spurs are left out and the noding is faster; option (c) is
+not built, because once the noding was fast it would save at most 32.4 s of 346.2 and would not be
+simpler.** Abisko's switch-on graph build takes **346.2 s, 2.14× the baseline, 139.2 s under the
+3× line (485.4 s)**. The switch-off graph is still main's byte for byte. Evidence, scripts and logs:
+`~/mockups/kayak-mode/offset-plan/phase-12e-2/`. No page, tile or browser run, no push.
+
+*What changed.* `routing/noding.py`: `cut_line` cuts a line in one pass instead of calling shapely's
+`substring` once per piece, which walks the line from its start every time; the pass repeats
+`substring`'s own arithmetic (the same running sum in the same order, the vertices strictly between
+the two distances, the same interpolated ends), and falls back to `substring` for anything but
+increasing positions inside the line. `routing/graph.py`: `_join_ends` reads its candidates by array
+instead of row by row. `network/paddle_network.py`: `_without_dead_ends` leaves out a Landing water
+spur whose bank end no other line of the build (bank, centre and open water, bridges carried over,
+streams, walking lines, carries, launches) reaches within the node tolerance; a second spur from the
+same point counts as reaching it, and a stream mouth's join always stays. The evidence reports the
+count as `dead-end spurs left out`.
+
+*Why not (c).* 12e's second noding cost 75.8 s because `substring` made every noding quadratic in a
+line's cuts; profiled, `cut_line` was 38 of the 52 s of a noding of Abisko's ways and water. With the
+one-pass cut the three nodings take 9.5 / 32.4 / 38.8 s. What (c) removes is the middle one, main's
+network with carries and launches, 32.4 s, and it would have to rebuild what that noding gives for
+free: the contact roles read off the nodes where ways meet the bank, and the bridges, which depend on
+which ends of the whole combined network are loose. Both would be a second copy of the graph build's
+own rules, to keep in step with it; the saving, less that copy's own cost, is under a tenth of the
+build. The brief's rule — land (c) only if it is proven identical and simpler — keeps 12e's flow.
+
+*Proof.* Switch off: Abisko built on this code from cached inputs is main's published graph byte for
+byte (data `b842a001…`, every header field), 105,923 edges. Switch on, the faster noding alone: the
+graph is 12e's byte for byte (payload, edges and chains; built with every spur kept). Switch on with
+the spurs left out, against that graph, edge by edge by source and exact coordinates (`prove.py`):
+
+- **1,564 dead-end spurs left out** on Abisko (1,640 edges: a spur crossing a line is cut there). The
+  other 2 of 12e's 1,566 loose Landing water ends are line ends a spur reaches at the crop, as phase 9
+  leaves such ends; they stay.
+- 115,853 edges are the same edge, every column equal but 7: 5 Landing water `chain_id`s lose the
+  digest they carried only because their id clashed with a spur now left out, and 2 costs differ in
+  the last bit, on lines a spur's foot cut (a piece's cost is prorated from the piece it was cut from).
+  Component membership is unchanged.
+- The other 752 edges are the lines the spurs' feet had cut, whole again: 750 are their pieces joined
+  coordinate for coordinate, the feet dropped as vertices (costs and lengths within 3e-14 of the
+  pieces' sums, directions and kinds the pieces', lake edges on their lake's plane), and 2 edges keep
+  their shape with one end moved 1.8 mm: a node is the first member of its cluster within
+  the node tolerance, and that member was the spur's end.
+- Every stream chain keeps phase 7's direction (311 of 311, 277 one way) and every lake plane is the
+  bank's (364 of 364).
+
+The route answers on phase 11's harness pairs were not replayed: the graphs differ only by edges no
+route can pass through (a dead end) and by lines joined where such an edge left them.
+
+*Abisko, switch on, against 12a's baseline:* 116,605 edges / 58,522 nodes / 295,172 vertices
+(1.101 / 1.192 / 1.146 of the baseline; limit 1.5); graph Brotli 1,778,561 bytes (+85,385; 12e
++122,697); peak RSS 1,656 MB. Landing water is 1,836 edges, 12.850 km, and costs the graph 35,859 bytes
+(12e: 3,485 edges, 66,427 bytes).
+
+| Abisko graph build, s | 12e | 12e-2 |
+|---|---:|---:|
+| Loading | 18.1 | 17.1 |
+| Walking noding | 25.4 | 9.5 |
+| Carries and launches found, and their noding | 64.3 | 43.6 |
+| Line off the bank: contacts / bodies / contours / landings / chords / assembly | 0.4 / 2.7 / 138.9 / 8.3 / 6.6 / 5.3 | 0.4 / 2.7 / 143.0 / 8.9 / 7.0 / 5.5 |
+| Noding again, bridges carried | 75.8 | 38.8 |
+| Checks after noding | 3.7 | 3.4 |
+| Derived fields / heights (with the probes) / the rest | 21.3 / 25.3 / 17.8 | 22.3 / 26.1 / 17.8 |
+| **Total** | **414.2** | **346.2** |
+
+The contour is now 41% of the build and the next place to look if a larger map needs it (12e's
+options (a) and (b)). The switch-off build is faster too, 130.3 s against 161.8 s, with the same graph.
+
+*Tests.* `test_noding.py`: `cut_line` against `substring`, coordinate for coordinate, on random lines
+of every scale, with heights, with returning vertices and with cuts at vertices.
+`test_paddle_network.py`: no Landing water bank end of degree one on the small map (it had 4 with every
+spur kept), and the rule on its own cases. The brief's test of one noding against two is not written,
+as (c) is not built.
+
+*For review.* Whether (c) is worth building later, should 12g find a map over 3×; that the switch-off build
+changes speed but not a byte; the spur rule's reach (the node tolerance, 0.01 m). Malingsbo-Kloten and
+Lomsdal-Visten stay for 12g, and their dead-end counts with them.
+
 ### Phase 12f — The tap, the line and the figures
 
 *Files:* `libs/src/trails/visualization/js/plan_mode.js` snapping/pricing/tally regions,

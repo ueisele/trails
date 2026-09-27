@@ -6,7 +6,7 @@ routing graph. The difference is only what goes in.
 """
 
 import math
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from collections.abc import Sequence
 from typing import Any, cast
 
@@ -200,9 +200,35 @@ def cut_line(geometry: LineString, positions: list[float]) -> list[LineString | 
         the positions it came from. An entry is None where the cut left nothing.
     """
     pieces: list[LineString | None] = []
-    for start, end in zip(positions[:-1], positions[1:], strict=True):
-        piece = substring(geometry, start, end)
-        pieces.append(piece if isinstance(piece, LineString) and piece.length > 0 else None)
+    starts, ends = positions[:-1], positions[1:]
+    length = geometry.length
+    if len(starts) < 2 or not all(0 <= start < end and start < length for start, end in zip(starts, ends, strict=True)):
+        for start, end in zip(starts, ends, strict=True):
+            piece = substring(geometry, start, end)
+            pieces.append(piece if isinstance(piece, LineString) and piece.length > 0 else None)
+        return pieces
+    # substring() walks the whole line from its start for every piece, which is quadratic
+    # in a long line cut many times: 38 of the 52 s a profiled noding of Abisko's ways and
+    # water took. This is its own arithmetic done once per line: the same running sum in the
+    # same order, the same vertices kept (strictly between the two distances) and the same
+    # interpolated ends, so every piece is the one substring() returns, coordinate for coordinate.
+    has_z = geometry.has_z
+    coords = [tuple(xy) for xy in shapely.get_coordinates(geometry, include_z=has_z).tolist()]
+    walked: list[float] = []
+    current: float = 0
+    for one, other in zip(coords[:-1], coords[1:], strict=True):
+        walked.append(current)
+        current += ((other[0] - one[0]) ** 2 + (other[1] - one[1]) ** 2) ** 0.5
+    if any(value != value for value in walked):
+        return [
+            piece if isinstance(piece, LineString) and piece.length > 0 else None
+            for piece in (substring(geometry, start, end) for start, end in zip(starts, ends, strict=True))
+        ]
+    tips = shapely.get_coordinates(shapely.line_interpolate_point(geometry, np.asarray(positions, dtype=float)), include_z=has_z).tolist()
+    for index, (start, end) in enumerate(zip(starts, ends, strict=True)):
+        first, last = bisect_right(walked, start), bisect_left(walked, end)
+        piece = LineString([tuple(tips[index]), *coords[first:last], tuple(tips[index + 1])])
+        pieces.append(piece if piece.length > 0 else None)
     return pieces
 
 

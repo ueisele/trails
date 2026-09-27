@@ -225,6 +225,31 @@ Uwe. It measures what 12b–12d inherit: plain 2 m simplification keeps the 12 m
 anchors at 15 m need more than a straight spur. The plan's §4.1 premise holds, and
 launches depend on the Shore source the same way. No production code changed.
 
+**Uwe's decisions on 12e's stop, 2026-09-27.** Verbatim: *"Ja mach c und erlaube 3x Dauer."*
+
+- **Option (c):** node the new water into the walking network once, instead of noding the whole
+  network twice. Today the build nodes main's whole network first. That graph is never shipped. It
+  only serves as a reference for contacts, bridges, stream decisions and lake planes. Then it nodes
+  everything again with the new water.
+- **Build-time allowance for the offset line:** the total graph build with the switch on may take up
+  to **3×** the baseline graph build of its map (161.8 / 388.0 / 1,025.4 s). Above that is a stop.
+  This replaces the plan's 1.5× aim / 2× stop for this line. Page Brotli, graph size and kayak p95
+  budgets are unchanged.
+
+**Review's decisions from the 12e report, 2026-09-27 (not Uwe's):** keep the role decoder in
+`routing_graph.js` in 12e (inert without roles; the switch-off graph payload is identical); leave out
+the dead-end Landing water spurs whose anchor has no land side, no stream and no other water left,
+reporting the count per map, while a spur whose anchor keeps any land, stream or launch/portage side
+stays; accept the 74 bridges dropped at the crop, as phase 9 treats crop ends; accept 12e's
+implementation choices.
+
+**Phase 12e-2, 2026-09-27.** The spurs are left out (1,564 on Abisko) and the noding cuts a line in one
+pass instead of once per piece. Abisko's switch-on graph build takes 346.2 s instead of 414.2 (2.14×,
+under the 3× line); the faster noding alone leaves every graph byte for byte as it was. (c) is not built: with the
+noding fast it would save at most 32.4 s and needs a second copy of the graph build's contact and
+bridge rules, so by the brief's own rule 12e's flow stays. Uwe asked for (c); this is the one place
+the phase departs from it, and the plan's 12e-2 note gives the figures.
+
 ### Phase 11 — Enter an edge in its middle, 2026-09-25
 
 Uwe, translated: *"Now it takes the way I wanted, but only when the pin is

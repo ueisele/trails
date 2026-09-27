@@ -170,6 +170,28 @@ def test_a_bridge_to_the_old_bank_now_reaches_its_anchor_and_its_spur(built):
     assert len(on[on["kind"] == BRIDGE]) <= len(off[off["kind"] == BRIDGE])
 
 
+def test_every_landing_spur_s_bank_end_meets_something_else(built):
+    edges = built["on"].edges
+    degree = np.bincount(edges[["from_node", "to_node"]].to_numpy(dtype=int).ravel(), minlength=len(built["on"].nodes))
+    landing = edges[edges["source"] == water.LANDING_WATER]
+    assert len(landing)
+    assert not (degree[landing[["from_node", "to_node"]].to_numpy(dtype=int)] == 1).any()
+
+
+def test_a_spur_whose_bank_end_nothing_else_reaches_is_left_out():
+    way = LineString([(0, -50), (0, 0)])
+    rows = [
+        {"geometry": LineString([(0, 0), (0, 15)]), "contact": 1},  # a way ends at its bank end: stays
+        {"geometry": LineString([(100, 0), (100, 15)]), "contact": 2},  # nothing there: left out
+        {"geometry": LineString([(200, 0), (200, 15)]), "contact": 3},  # two spurs from one anchor: both stay
+        {"geometry": LineString([(200, 0), (215, 10)]), "contact": 3},
+        {"geometry": LineString([(300, 0), (300, 15)]), "contact": -1},  # a mouth join starts on its stream: stays
+    ]
+    kept, dropped = paddle_network._without_dead_ends(rows, [way])
+    assert dropped == 1
+    assert [row["geometry"].coords[0] for row in kept] == [(0, 0), (200, 0), (200, 0), (300, 0)]
+
+
 def test_stream_directions_are_the_bank_build_s_even_where_the_new_lines_cut_them_finer(built):
     off, on = built["off"].edges, built["on"].edges
     old = off[off["source"] == water.STREAMS].groupby("chain_id")
