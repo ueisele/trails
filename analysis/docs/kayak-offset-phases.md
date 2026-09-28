@@ -1362,7 +1362,7 @@ suite isolation; a reading that only passes under `--only` is not ready.
 
 **Done 2026-09-27 — 12f: a kayak tap near the bank takes the line off the bank, a raw point enters no
 landing in its middle, and the figures count every piece once; on Abisko with the switch on, 960 of 960
-comparisons equal the extended reference and kayak p95 is 425.65 / 418.30 ms against 525.45 / 528.08.**
+comparisons equal the extended reference and kayak p95 is 409.20 / 437.30 ms against 525.45 / 528.08.**
 With the switch off, Abisko's graph is main's byte for byte and its 960 answers equal 12a's frozen labels
 exactly. Evidence, scripts and logs: `~/mockups/kayak-mode/offset-plan/phase-12f/` (`README.md` first).
 No push, publication, tile build or cache write; the pages built are scratch.
@@ -1430,10 +1430,13 @@ endpoints: 97,088 segments with landings offered, 96,188 skipped (−900, −0.9
 
 | Kayak p95, ms | Landings skipped (built) | Landings offered | Budget |
 |---|---:|---:|---:|
-| Stay on paths off | 425.65 (p50 54, max 668) | 409.20 | 525.45 |
-| Stay on paths on | 418.30 (p50 55, max 700) | 437.30 | 528.08 |
+| Stay on paths off | 409.20 | 425.65 (p50 54, max 668) | 525.45 |
+| Stay on paths on | 437.30 | 418.30 (p50 55, max 700) | 528.08 |
 
 The two variants give the same answer on all 400 pairs; the difference in p95 is within run-to-run noise.
+*Corrected in 12g (2026-09-28):* 12f's table had the two columns the wrong way round. Its timing script
+cleared the landing marks for the column it called built, which offers the landings; the built rule is
+the other column, 409.20 / 437.30 ms. Both are under the budget, as before.
 
 *Switch off.* Graph header and data byte-identical to main's page. The harness with the stored
 attachments: 960 of 960 equal to the reference (largest error 2.91 × 10⁻¹¹) and to 12a's frozen labels
@@ -1502,6 +1505,73 @@ components are joined by Narrow water along the arc, contained in that water and
 and after the grid, however narrow the water (as 12c keeps a middle through a pinch). Ends on different arcs
 are never joined, so no join passes a dam; a circle wholly in water stops the build
 (`paddle_network.joined_along_the_discs`). It restores connections main had and changes no dam rule.
+
+**Built 2026-09-28 — Abisko: the first map paddles the line off the bank.** The park table's
+`paddle_offset` is on for Abisko alone; Malingsbo-Kloten and Lomsdal-Visten stay off. Built on main
+`d3b8848` with the shared fixes of 12g-MK and 12g-LV; the graph is byte for byte the one built on
+`6641db1` (edges, payload, header and data). Evidence, scripts and logs:
+`~/mockups/kayak-mode/offset-plan/phase-12g-abisko/` (`README.md` first). Every heavy step ran
+alone under the shared lock; the times are the scripts' own clocks.
+
+| Abisko | Baseline (12a) | Switch on | Budget |
+|---|---:|---:|---:|
+| Graph build s (12e-2's `build.py`) | 161.8 | 325.0 (2.01×; peak RSS 1,657 MB) | 485.4 (3×) |
+| Edges / nodes / vertices | 105,923 / 49,101 / 257,555 | 117,154 / 58,593 / 296,267 (1.106 / 1.193 / 1.150) | 1.5× |
+| Page Brotli bytes (q11) | 2,202,200 | 2,292,937 (+90,737) | +500,000 |
+| Graph Brotli bytes (12a's method) | 1,693,176 | 1,782,216 (+89,040) | |
+| Kayak p95 ms, Stay on paths off / on | 350.30 / 352.05 | 436.15 / 452.00 | 525.45 / 528.08 |
+| Walking p95 ms, off / on | 418.15 / 258.60 | 524.20 / 356.05 | |
+
+The p95s time the built rule (landings skipped), one search per pair after four warm-ups, Firefox 153;
+main's page timed in the same hold reads 347.20 / 358.15 (kayak) and 415.30 / 273.05 (walking), so the
+line costs kayak search 1.26 / 1.26× and walking 1.26 / 1.30× on that day's machine. Page `93d55ae2…`,
+graph data `d5138cdf…`.
+
+*§4.4, on the final build.* Shore: every written segment at least 12.967 m from the unsimplified bank,
+12.957 m after noding and the page's grid (0 segments under 12 m), deviation from the raw contour at
+most 2.0999 m and 2.0916 m after noding; 67 Shore edges are shorter than the grid and collapse to a
+point. Narrow water: every piece holds the middle (raw at most 0.250 m, delivered 0.994 m, at most 0.0976
+of the width; 2,034 sub-metre vertices held before encoding, the grid adding at most 0.058 m); cross
+sections 3,088 of 3,088. Dry: Shore 0, Narrow water 25.86 m (at most 0.058 m out), Open water 2.17 m,
+Landing water 378.39 m with its bank steps; no dams. Contacts 5,760, every one mapped; no loose carry,
+launch or Landing end but 2 carries and 2 Landing ends at the crop. Witnesses: through 671 of 690 (19
+cut by the crop), islands 662 alone (35 cut), 0 island failures, bays 1,056 of 1,094 (38 cut), the 8
+vanished bodies one piece each; **no seam**. Stream directions 311 of 311 (277 one way), lake planes 364
+of 364. Drawn at z17 / z18 on six legs (both scene lake legs, the bay, the launch, the narrow and the
+carry): the Shore Leaflet draws stays at least 12.97 / 13.06 m from the bank, Leaflet's simplification
+moves the line at most 0.54 m. Length, profile, panel and both files agree (the phase-12f readings).
+
+*Harness.* Phase 11's Abisko sample, 960 comparisons against the reference: 0 mismatches, largest
+error 2.91 × 10⁻¹¹.
+
+*Changed routes against main's page* (240 pairs a setting). Kayak: 145 (146 with Stay on paths)
+change; paddled 2,261,949 → 2,237,334 m and on foot 921,854 → 949,931 m over all pairs; entry and exit
+points move by a median 16.4 m. Land price rises on 36 pairs and falls on 65: of the rises, 14 have an end
+that stood on the old bank line and is a raw point now, 20 a connector that ended on the old bank line,
+now 15 m or more from the line, 2 other; the largest is +176.0. The longest new ways paddle what
+the Narrow water now joins (pair 95, +32.8 km, pair 159, +26.9 km, whose land price falls). Walking
+(informational; the question is Uwe's): 13 answers cost more than 0.5 more, 11 of them because they
+had turned at a water-only node on the old bank line, 38 cost less; with Stay on paths 9 and 42.
+
+*Drive.* The two offset readings are out of the scene's skips. Three shared reading commits, taken by
+MK and Lomsdal-Visten as they are: the lake-bank reference follows the line off the bank (Shore,
+Narrow water, mouths and caps on it); a bank leg is read from its exact taps, which keep phase 8's
+allowance of a grid cell per connector end, and from finger taps beside them, which need no land; and,
+by review's decision from Lomsdal-Visten's page, a bay counts as cut over water by an Open water chord
+or a straight water connector longer than d + 2.1 m, the lake leg's exact taps hold the same allowance,
+and the reference tests its open-water edges together against a bank cut in short pieces (Abisko's
+31,164 in 2.2 s; the one-edge-at-a-time test took 576 s of Lomsdal-Visten's shore check). The
+scene's carry now paddles between its lakes, which Narrow water joins, so a new fixture carries 128.5 m
+between two lakes no water joins, with network paddle on both sides. The selection read twice green on
+the final page (401 readings, 0 broken); `make drive-all` once, 1,834 readings, 0 broken, 9 figures moved
+and 4 new. Moved and new figures, with why, are
+in the evidence's `scene-diff.md` and in the scene's figures.
+
+The dry walking way's figures and GPX words moved: the new lines node the ways it runs on (walking
+edges 44,994 → 45,138), which resamples it, 16,700.517 → 16,700.507 m.
+
+*For MK and Lomsdal-Visten.* The three reading commits; a scene carry may likewise stop carrying where
+Narrow water joins its lakes; exact bank taps may cross a grid cell of land.
 
 ### Phase 12h — Review the three maps as one feature
 

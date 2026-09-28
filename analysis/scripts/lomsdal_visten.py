@@ -267,6 +267,8 @@ PARKS: dict[str, Park] = {
         naturkartan="abisko-naturkartan.toml",
         county=("norrbotten",),
         water_municipalities=("2584",),
+        # The first map to paddle the line 15 m off the bank (phase 12g, Abisko).
+        paddle_offset=True,
     ),
     "malingsbo-kloten": Park(
         name="Malingsbo-Kloten",

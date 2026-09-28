@@ -276,6 +276,10 @@ class Scene:
     #: these carries by walking land price, including inferred ground.
     #: None until this scene's rebuilt page has a measured way between lakes.
     kayak_portage: tuple[tuple[float, float], tuple[float, float]] | None = None
+    #: Finger taps on the water either side of a carry the route must take, so the leg paddles
+    #: the network, carries and paddles again (12g: a routed carry with network paddle on both
+    #: sides). None where the scene's own carry already has that shape or none was chosen.
+    kayak_carry_fingers: tuple[tuple[float, float], tuple[float, float]] | None = None
     #: The measured path alternative: before phase 8 for the original scenes,
     #: re-measured with landing joins when phase 9 replaces a scene.
     kayak_portage_path_m: float | None = None
@@ -545,6 +549,11 @@ SCENES: dict[str, Scene] = {
         kayak_bay=WaterLeg(((68.355318, 18.836408), (68.358208, 18.865112)), shore_m=3091.4545097209148),
         kayak_portage=((68.268452, 18.179781), (68.271026, 18.180649)),
         kayak_portage_path_m=335.9521263872096,
+        # 12g: the carry above paddles across since the line off the bank joins its two lakes by
+        # Narrow water. A 128.5 m carry between two lakes no water joins, near (68.2582, 18.4211),
+        # chosen on the switch-on graph (offset-plan/phase-12g-abisko/choose_carry.py): a point on
+        # each side's Shore line 120-250 m from the carry's end and at least 40 m from any way.
+        kayak_carry_fingers=((68.2581775, 18.4179275), (68.259505, 18.426248)),
         # Chosen on the switch-on page of phase 12f (offset-plan/phase-12f/choose_taps.py), on
         # Torneträsk by Abisko: bank taps 1.5 m into the water with no way within 25 m, the Shore
         # line 13.1 and 12.8 m out, 694 m apart; beside the goal a channel whose Narrow water is
@@ -567,10 +576,6 @@ SCENES: dict[str, Scene] = {
             "a kayak launches from the road",
             "the kayak path switch changes the carry",
             "a way enters the middle of a road",
-            # Phase 12f's readings of the line off the bank run only on a page built with
-            # the switch on; 12g switches each map on and takes these two out.
-            "the tap takes the line off the bank",
-            "the line off the bank is counted once",
         ),
         # Kungsleden from Abisko to Abiskojaure and Rallarvägen on to Tornehamn,
         # one register chain of 30.7 km.
@@ -8340,6 +8345,28 @@ def a_carry_uses_walking_prices(page: Any) -> Check:
                 note="Phase 9 retains the original taps in the reader report and reselects this routed-carry fixture.",
             )
         )
+    if SCENE.kayak_carry_fingers is not None:
+        fingers = read_water_leg(page, SCENE.kayak_carry_fingers, raw_zoom=FINGER_ZOOM, measure_shore=True)
+        track = [part for part in fingers["paddledTrack"] if part["length"] >= 1]
+        paddled = [i for i, part in enumerate(track) if part["kind"] == "paddled" and part["sources"]]
+        # The probe credits a search's carry metres to its first part, so the carry is found by kind.
+        carried = [i for i, part in enumerate(track) if part["kind"] == "routed"]
+        f = fingers["state"]
+        approaches += water_leg_readings(fingers, "carry, finger taps") + [
+            Reading("carry, finger taps: both taps take a travel line", all(p["node"] >= 0 or p.get("edge", -1) >= 0 for p in f["points"]), True),
+            Reading("carry, finger taps: the way carries", bool(carried) and sum(part["portage"] for part in track) > 0, True),
+            Reading(
+                "carry, finger taps: network paddle on both sides of the carry",
+                bool(paddled and carried and min(paddled) < min(carried) and max(paddled) > max(carried)),
+                True,
+            ),
+            noted(
+                "carry, finger taps: parts (kind, m, carried m)",
+                [(part["kind"], round(part["length"], 2), round(part["portage"], 2)) for part in track],
+            ),
+            stands("kayak carry, finger taps, on foot, m", round(f["walked"], 3), within=0.001),
+            stands("kayak carry, finger taps, water, m", round(f["crossed"], 3), within=0.001),
+        ]
     return Check(
         name,
         water_leg_readings(got, "portage")

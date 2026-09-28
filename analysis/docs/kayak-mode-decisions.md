@@ -105,7 +105,9 @@ would draw it without a change.
 
 ## 5. Changes
 
-- 2026-09-27 — phase 12f: a kayak tap near the bank takes the line off the bank (d + 2.1 m reach, travel before open water in that band, land kept when as near), and a raw point enters no Landing water in its middle. On Abisko with the switch on 960 of 960 comparisons equal the extended reference and kayak p95 is 425.65 / 418.30 ms (budget 525.45 / 528.08); switch off, graph and answers are main's. Not yet switched on; 12g does that per map.
+- 2026-09-28 — phase 12g, Abisko: the line off the bank is switched on for Abisko. All §4.4 gates hold, 960 of 960 comparisons equal the reference, kayak p95 436.15 / 452.00 ms (budget 525.45 / 528.08), graph build 325.0 s (limit 485.4), page +90,737 bytes Brotli (limit +500,000). Malingsbo-Kloten and Lomsdal-Visten stay off until their own runs.
+
+- 2026-09-27 — phase 12f: a kayak tap near the bank takes the line off the bank (d + 2.1 m reach, travel before open water in that band, land kept when as near), and a raw point enters no Landing water in its middle. On Abisko with the switch on 960 of 960 comparisons equal the extended reference and kayak p95 is 409.20 / 437.30 ms (budget 525.45 / 528.08; corrected in 12g, 12f's note had swapped its two timing columns); switch off, graph and answers are main's. Not yet switched on; 12g does that per map.
 
 - 2026-09-26 — phase 12a: the offset line's baseline is frozen from main `6de243c` without a rebuild, and the 10 / 15 / 20 m comparison on twelve source patches finds no reason to leave 15 m. Records and scratch only; the figures are under "The line off the bank" below.
 

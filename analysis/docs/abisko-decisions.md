@@ -2921,6 +2921,11 @@ contains the changes, both timing samples and the shared rule Uwe approved.
 Selected checks pass twice; Abisko's full drive has 1,638 readings with no
 broken invariants or moved figures. Hooks pass with both test suites.
 
+**The line off the bank, 2026-09-28.** Abisko is the first map whose kayak follows a line 15 m off
+the bank, with the middle of water narrower than 30 m ([phase 12g](kayak-offset-phases.md#phase-12g--one-final-map-per-run-abisko-then-mk-then-norway)).
+The scene's lake, bay and carry figures moved with it; the carry west of Valfojåkka now paddles, since
+Narrow water joins its two lakes, and a new carry of 128.5 m keeps the reading of a routed carry.
+
 ---
 
 ### 9.30 The page asked for a newer worker on every load — done and undone the same evening, 2026-09-16
