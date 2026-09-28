@@ -1735,6 +1735,19 @@ record under the normal worktree rules. Commit, push and publication follow the 
 existing explicit authorisation for that future execution; this planning request grants
 none of them.
 
+**Released 2026-09-28.** All three maps were built on main `a0cd05e` with the switch on and
+driven page by page (Abisko 1,834, Malingsbo-Kloten 1,984, Lomsdal-Visten 1,823 readings, 0 broken,
+0 moved). `make drive-all`'s three Firefoxes at once no longer fit a 10 GB cap with these pages, so
+the same readings ran one page at a time. Uwe chose to publish first and read the line on the phone
+after ("Ja weg 1. veröffentliche."); the three pages read back byte for byte as built. His phone
+reading, 2026-09-28: "Sieht sehr gut aus."
+
+Left for the next step, with Uwe's walking decision (2026-09-28, "Ich würde A sagen"): walking legs
+join and turn only at nodes with a walkable edge; the edges of no length the page's grid leaves
+(the dam repair's 14 on Malingsbo-Kloten, Abisko's 67 collapsed Shore edges); the 154 coincident
+walking node pairs on Malingsbo-Kloten that a connector of no length leaves unjoined; and
+`drive-all`'s memory.
+
 ## 6. Outside this step
 
 No new water source, finer shared grid, exact-width walking price, wind/fetch/exposure
