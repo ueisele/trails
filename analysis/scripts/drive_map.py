@@ -8246,15 +8246,31 @@ def cut_over_water(got: dict[str, Any]) -> bool:
     return max(connectors, default=0.0) > PADDLE_OFFSET_M + CONTOUR_DEVIATION_M
 
 
+def cut_by_connector(got: dict[str, Any]) -> bool:
+    """Whether a leg crosses open water by a straight connector rather than by the network's chords."""
+    return got["state"]["tally"]["sources"].get("Open water", 0) == 0 and cut_over_water(got)
+
+
 def finger_tap_readings(
     page: Any, points: tuple[tuple[float, float], tuple[float, float]], what: str, figure: str
 ) -> tuple[dict[str, Any], list[Reading]]:
     """The same leg from finger taps beside the exact ones: they take the line off the bank, and need no land."""
     got = read_water_leg(page, points, raw_zoom=FINGER_ZOOM, measure_shore=True)
     s = got["state"]
+    if cut_by_connector(got):
+        # A straight connector over water is priced on the 25 m cells, where it crosses no land,
+        # and tallied at 5 m posts, which may find a bank's edge; §4.3 lets the public on-foot
+        # figure differ by a cell per connector end, as phase 8's connectors do.
+        allowance = 2 * page.evaluate("() => trailsGraph.water.cellM")
+        land = [
+            Reading(f"{what}, finger taps: cut by a water connector, no land beyond a cell per end", s["walked"] <= allowance, True),
+            noted(f"{what}, finger taps: land / allowance, m", [s["walked"], allowance]),
+        ]
+    else:
+        land = [Reading(f"{what}, finger taps: no land", s["walked"], 0)]
     return got, water_leg_readings(got, f"{what}, finger taps") + [
         Reading(f"{what}, finger taps: both taps take a travel line", all(p["node"] >= 0 or p.get("edge", -1) >= 0 for p in s["points"]), True),
-        Reading(f"{what}, finger taps: no land", s["walked"], 0),
+        *land,
         stands(figure, round(s["crossed"], 3), within=0.001),
     ]
 
@@ -9062,16 +9078,31 @@ def a_paddled_profile_is_flat(page: Any) -> Check:
     readings: list[Reading] = []
     # With the line off the bank the lake's profile is read from finger taps, which take the line;
     # the exact bank taps reach it over a grid cell of land (`exact_tap_land`).
-    finger = FINGER_ZOOM if water_roles(page) else None
+    offset = water_roles(page)
+    finger = FINGER_ZOOM if offset else None
     for label, leg in (("shore", SCENE.kayak_shore), ("bay", SCENE.kayak_bay)):
         got = read_water_leg(page, leg.points, raw_zoom=finger)
         s, h = got["state"], got["heights"]
+        if offset:
+            # A finger leg cut by a water connector may be tallied a few metres on foot at a bank's
+            # edge (`finger_tap_readings`); the profile must agree with the leg's own tally.
+            whole = s["crossed"] + s["walked"]
+            covers = [
+                Reading(f"{label}: this profile is paddled", s["crossed"] > 0, True),
+                Reading(f"{label}: the profile spans the leg's paddled and on-foot metres", h["span"], whole, within=0.001),
+                Reading(f"{label}: the last sample reaches the end", h["end"], whole, within=0.001),
+            ]
+        else:
+            covers = [
+                Reading(f"{label}: this profile is all water", s["crossed"] > 0 and s["walked"] == 0, True),
+                Reading(f"{label}: the profile spans the paddled metres", h["span"], s["crossed"], within=0.001),
+                Reading(f"{label}: the last sample reaches the end", h["end"], s["crossed"], within=0.001),
+            ]
         readings += water_leg_readings(got, label) + [
-            Reading(f"{label}: this profile is all water", s["crossed"] > 0 and s["walked"] == 0, True),
+            covers[0],
             Reading(f"{label}: every height was read", h["samples"] > 1 and h["samples"] == h["read"], True),
             Reading(f"{label}: the water stays within 0.5 m", h["low"] is not None and h["high"] - h["low"] <= 0.5, True),
-            Reading(f"{label}: the profile spans the paddled metres", h["span"], s["crossed"], within=0.001),
-            Reading(f"{label}: the last sample reaches the end", h["end"], s["crossed"], within=0.001),
+            *covers[1:],
             noted(f"{label}: water profile samples and limits", h),
         ]
     return Check(name, readings)
