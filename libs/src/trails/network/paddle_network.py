@@ -135,6 +135,9 @@ class Assembled:
         dams: Dam points, metric
         water: The eligible bodies the line was drawn from, metric
         evidence: Counts and timings by step
+        loose_before: Carry and launch ends the earlier build left meeting nothing,
+            which :func:`validate` does not count against the line off the bank
+        extent: The map extent, metric, where a crop may leave an end loose
     """
 
     sources: list[NetworkSource]
@@ -145,6 +148,9 @@ class Assembled:
     dams: np.ndarray
     water: Bodies
     evidence: dict[str, Any] = field(default_factory=dict)
+    #: Where a carry or launch of the earlier build already ended on nothing, metric.
+    loose_before: np.ndarray = field(default_factory=lambda: np.empty((0, 2)))
+    extent: BaseGeometry | None = None
 
 
 def contacts(old: Network, *, dams: np.ndarray, extent: BaseGeometry | None) -> gpd.GeoDataFrame:
@@ -461,7 +467,7 @@ def assemble(old: Network, sources: list[NetworkSource], access: Access, *, metr
     started = time.perf_counter()
     evidence: dict[str, Any] = {"relabelled owners": relabelled, "contacts": len(found), "anchors": len(anchors)}
     lines = result.lines.copy()
-    centre = result.centre.copy()
+    centre, evidence["centre ends put on their anchor"] = _on_their_anchors(result.centre)
     evidence["contact crossings"] = _contacts_written(result, lines, centre)
     interfaces, meets = _interfaces(landed, lines, centre)
     seams = _crop_seams(result, wide, extent)
@@ -603,7 +609,61 @@ def assemble(old: Network, sources: list[NetworkSource], access: Access, *, metr
         dams=dams,
         water=wide,
         evidence=evidence,
+        loose_before=_loose_carry_ends(old),
+        extent=extent,
     )
+
+
+def _on_their_anchors(centre: gpd.GeoDataFrame) -> tuple[gpd.GeoDataFrame, int]:
+    """Put each centre branch end that serves an access anchor back on the anchor itself.
+
+    The raw branch ends exactly on the anchor, the node a carry, launch or way ends
+    on; the written branch is the raw one simplified and put through the page's
+    grid, which moves that end by up to the grid's half diagonal (about 6 cm). That
+    is farther than noding joins (``NODE_TOLERANCE_M``), and a landing that finds the
+    line already running through its anchor draws no spur: the carry and the water
+    were left a few centimetres apart, joined to nothing. The page rounds both ends
+    alike afterwards, so they stay one node.
+
+    Returns:
+        The centre lines, and how many ends were put back
+    """
+    rows = centre.copy()
+    geometry = rows.geometry.to_numpy().copy()
+    raw = rows["raw"].to_numpy()
+    moved = 0
+    for i in np.flatnonzero((rows["start"] == pg.ANCHOR).to_numpy() | (rows["end"] == pg.ANCHOR).to_numpy()):
+        coords = shapely.get_coordinates(geometry[i]).copy()
+        ends = shapely.get_coordinates(raw[i])[[0, -1]]
+        for at, kind, anchor in ((0, rows["start"].iloc[i], ends[0]), (-1, rows["end"].iloc[i], ends[1])):
+            if kind == pg.ANCHOR and not np.array_equal(coords[at], anchor):
+                coords[at] = anchor
+                moved += 1
+        geometry[i] = LineString(coords)
+    return rows.set_geometry(gpd.GeoSeries(geometry, index=rows.index, crs=rows.crs)), moved
+
+
+def _loose_carry_ends(network: Network) -> np.ndarray:
+    """The ends of carries and launches that meet no other edge, as metric points.
+
+    A carry or launch runs from land to water; an end that meets nothing is a way
+    no route can leave. The earlier build's are recorded, so that :func:`validate`
+    tells those apart from any the line off the bank would add.
+    """
+    edges = network.edges
+    if not len(edges):
+        return np.empty((0, 2))
+    ends = np.concatenate([edges["from_node"].to_numpy(dtype=int), edges["to_node"].to_numpy(dtype=int)])
+    degree = np.bincount(ends, minlength=len(network.nodes))
+    carry = edges["kind"].isin((PORTAGE, LAUNCH)).to_numpy()
+    first = shapely.get_coordinates(shapely.get_point(edges.geometry.to_numpy(), 0))
+    last = shapely.get_coordinates(shapely.get_point(edges.geometry.to_numpy(), -1))
+    loose = [
+        xy
+        for nodes, points in ((edges["from_node"].to_numpy(dtype=int), first), (edges["to_node"].to_numpy(dtype=int), last))
+        for xy in points[carry & (degree[nodes] == 1)]
+    ]
+    return np.asarray(loose, dtype=float).reshape(-1, 2)
 
 
 def _target(targets: dict[str, gpd.GeoDataFrame], kind: str, row: int, near: np.ndarray, body: int) -> pd.Series:
@@ -1246,4 +1306,43 @@ def validate(network: Network, assembled: Assembled) -> dict[str, Any]:
             figures["near the bank"] = len(touching)
             figures["dry m, bank steps included"] = round(dry, 3)
         out[name] = figures
+    out["loose access ends"] = _loose_access(network, assembled, degree)
+    added = {source: count for source, count in out["loose access ends"]["new"].items() if count}
+    if added:
+        raise ValueError(f"{sum(added.values())} carry, launch or landing ends meet nothing: {added}; at {out['loose access ends']['at']}")
     return out
+
+
+def _loose_access(network: Network, assembled: Assembled, degree: np.ndarray) -> dict[str, Any]:
+    """The gate the contact count cannot be: every carry, launch and landing end meets another edge.
+
+    A carry's or launch's water end, and a Landing water spur's either end, that
+    meets nothing is a way no route can take, however well its contact was mapped.
+    Counted by source; an end the map's crop leaves (within the bank step of the
+    extent's edge) and a carry or launch end the earlier build had already left
+    loose are counted apart. Any other is new and stops the build.
+    """
+    edges = network.edges
+    access = edges["kind"].isin((PORTAGE, LAUNCH)).to_numpy() | (edges["source"] == LANDING_WATER).to_numpy()
+    first = shapely.get_coordinates(shapely.get_point(edges.geometry.to_numpy(), 0))
+    last = shapely.get_coordinates(shapely.get_point(edges.geometry.to_numpy(), -1))
+    sources = edges["source"].to_numpy()
+    rows = [
+        (source, xy)
+        for nodes, points in ((edges["from_node"].to_numpy(dtype=int), first), (edges["to_node"].to_numpy(dtype=int), last))
+        for source, xy in zip(sources[access & (degree[nodes] == 1)], points[access & (degree[nodes] == 1)], strict=True)
+    ]
+    out: dict[str, Any] = {"new": Counter(), "at the crop": Counter(), "loose before": Counter(), "at": []}
+    before = shapely.STRtree(cast(np.ndarray, shapely.points(assembled.loose_before))) if len(assembled.loose_before) else None
+    edge = assembled.extent.boundary if assembled.extent is not None else None
+    for source, xy in rows:
+        point = Point(xy)
+        if edge is not None and point.distance(edge) <= pg.BANK_STEP_M:
+            out["at the crop"][source] += 1
+        elif before is not None and len(before.query(point, predicate="dwithin", distance=NODE_TOLERANCE_M)):
+            out["loose before"][source] += 1
+        else:
+            out["new"][source] += 1
+            if len(out["at"]) < 5:
+                out["at"].append([round(float(v), 2) for v in xy])
+    return {key: dict(value) if isinstance(value, Counter) else value for key, value in out.items()}

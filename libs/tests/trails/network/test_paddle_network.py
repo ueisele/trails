@@ -10,7 +10,7 @@ from shapely.geometry import LineString, Point, box
 from trails.network import graphs, paddle_geometry, paddle_network, water
 from trails.routing.elevation import with_elevation
 from trails.routing.graph import Network, build_network
-from trails.routing.sources import BRIDGE, LANDING, OPEN, PADDLE, PATH, STREAM, TRAVEL, NetworkSource
+from trails.routing.sources import BRIDGE, LANDING, OPEN, PADDLE, PATH, PORTAGE, STREAM, TRAVEL, NetworkSource
 
 CRS = "EPSG:3006"
 LAKE = "Sjö"
@@ -398,3 +398,66 @@ def test_pieces_a_dam_disc_cut_apart_on_one_side_are_joined_along_it_and_never_a
     # Joined once, the network is left as it is.
     again, figures = paddle_network.joined_along_the_discs(joined, np.array([dam]), bodies)
     assert figures["joins"] == 0 and again is joined
+
+
+def _anchored_branch(written_end: tuple[float, float]) -> gpd.GeoDataFrame:
+    """A centre branch from a join to an anchor at (100, 0); its written end where the page's grid put it."""
+    return gpd.GeoDataFrame(
+        {
+            "start": [paddle_geometry.JOIN],
+            "end": [paddle_geometry.ANCHOR],
+            "raw": [LineString([(100, 40), (100, 20), (100, 0)])],
+        },
+        geometry=[LineString([(100.02, 40.03), (100.01, 20), written_end])],
+        crs=CRS,
+    )
+
+
+def _carry_meets_the_branch(centre: gpd.GeoDataFrame) -> tuple[Network, np.ndarray]:
+    carry = NetworkSource(
+        "Portages", gpd.GeoDataFrame(geometry=[LineString([(100, -300), (100, 0)])], crs=CRS), kind=PORTAGE, keep_whole=True, settled=True
+    )
+    narrow = NetworkSource(water.NARROW_WATER, centre[["geometry"]], kind=PADDLE, keep_whole=True, settled=True)
+    network = build_network([carry, narrow], metric_crs=CRS, bridge_m=0.0)
+    degree = np.bincount(network.edges[["from_node", "to_node"]].to_numpy(dtype=int).ravel(), minlength=len(network.nodes))
+    return network, degree
+
+
+def test_a_centre_branch_serving_an_anchor_ends_on_the_anchor_after_the_page_s_grid():
+    # The grid moves the written end 3.6 cm: farther than noding joins, so the carry would end on nothing.
+    centre = _anchored_branch((100.02, 0.03))
+    network, degree = _carry_meets_the_branch(centre)
+    carry = network.edges[network.edges["source"] == "Portages"]
+    assert (degree[carry[["from_node", "to_node"]].to_numpy(dtype=int)] == 1).sum() == 2
+
+    put, moved = paddle_network._on_their_anchors(centre)
+    assert moved == 1
+    written = shapely.get_coordinates(put.geometry.iloc[0])
+    assert tuple(written[-1]) == (100.0, 0.0)
+    # The end at the join is the contour's to meet and stays where it was written.
+    assert tuple(written[0]) == (100.02, 40.03) and tuple(written[1]) == (100.01, 20.0)
+    network, degree = _carry_meets_the_branch(put)
+    carry = network.edges[network.edges["source"] == "Portages"]
+    assert (degree[carry[["from_node", "to_node"]].to_numpy(dtype=int)] == 1).sum() == 1
+
+
+def test_the_build_stops_on_a_carry_end_that_meets_nothing_unless_the_earlier_build_or_the_crop_left_it():
+    network, degree = _carry_meets_the_branch(_anchored_branch((100.02, 0.03)))
+    assembled = paddle_network.Assembled(
+        sources=[],
+        probes=gpd.GeoDataFrame(geometry=[], crs=CRS),
+        contours=None,
+        landings=None,  # type: ignore[arg-type]
+        contacts=gpd.GeoDataFrame(geometry=[], crs=CRS),
+        dams=np.empty(0),
+        water=None,  # type: ignore[arg-type]
+        loose_before=np.array([[100.0, -300.0]]),
+    )
+    found = paddle_network._loose_access(network, assembled, degree)
+    assert found["new"] == {"Portages": 1} and found["loose before"] == {"Portages": 1}
+    assert found["at"] == [[100.0, 0.0]]
+    # The same end on the map's edge is the crop's.
+    cropped = replace(assembled, extent=box(-500, 0, 500, 500))
+    assert paddle_network._loose_access(network, cropped, degree)["new"] == {}
+    network, degree = _carry_meets_the_branch(paddle_network._on_their_anchors(_anchored_branch((100.02, 0.03)))[0])
+    assert paddle_network._loose_access(network, assembled, degree)["new"] == {}
