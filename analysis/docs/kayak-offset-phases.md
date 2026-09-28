@@ -1485,6 +1485,15 @@ but do not proceed to the next heavy build while it remains unresolved. Run sele
 new/existing kayak checks twice green on the final page and full walking readings. Store
 hashes tying drives and differentials to the precise final payload.
 
+**Review's decision, 2026-09-27 (not Uwe's), on 12g-MK's stop at the dam gate:** the rounding is
+repaired, not accepted. With the switch on, a paddled line end cut at an analytic dam disc is written
+on the page grid point nearest it, among the rounded point and its neighbours, that keeps the point and
+each paddled edge's end segment outside every disc; every edge at that node moves its end with it
+(`paddle_network.written_off_the_discs`). A map without dam input is returned unchanged, the same
+object, so Abisko's and Lomsdal-Visten's switch-on graphs do not change. Known switch-off state that
+this line does not change: main's Malingsbo-Kloten graph keeps phase 9's 284 paddled edges whose
+rounded end lies up to 5.6 cm inside a disc (Shore 143, Open water 125, Streams 16, every one at a line end).
+
 ### Phase 12h — Review the three maps as one feature
 
 *Reviewing session.* *Files:* final approval/build notes in

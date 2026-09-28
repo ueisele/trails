@@ -312,3 +312,54 @@ def test_a_carry_ending_at_a_dam_anchor_ends_where_its_spur_was_moved_out_of_the
     ends = [shapely.get_coordinates(line)[-1] for line in moved.gdf.geometry]
     assert ends[0] == pytest.approx(written) and ends[1] == pytest.approx([50, -60])
     assert moved.gdf.crs == carry.gdf.crs
+
+
+def _cut_end_rounding_inward(dam: Point) -> Point:
+    """A point on the dam's 25 m circle that the page's grid writes inside the disc."""
+    to_page, from_page = paddle_geometry._page_round_trip(CRS)
+    for degrees in np.arange(0.0, 360.0, 0.5):
+        end = np.array([dam.x + water.DAM_CUT_M * np.cos(np.radians(degrees)), dam.y + water.DAM_CUT_M * np.sin(np.radians(degrees))])
+        if np.hypot(*(paddle_geometry.decoded(end[None, :], to_page, from_page)[0] - [dam.x, dam.y])) < water.DAM_CUT_M - 0.01:
+            return Point(end)
+    raise AssertionError("no circle point rounds inward")
+
+
+def test_a_line_end_cut_at_a_dam_disc_is_written_on_a_grid_point_outside_it():
+    # In Sweden, where the grid moves a point by centimetres; the end sits exactly on the circle, as the cut leaves it.
+    dam = Point(650_000, 7_580_000)
+    end = _cut_end_rounding_inward(dam)
+    away = Point(end.x + 40 * (end.x - dam.x) / 25, end.y + 40 * (end.y - dam.y) / 25)
+    shore = NetworkSource("Shore", gpd.GeoDataFrame(geometry=[LineString([away, end])], crs=CRS), kind=PADDLE)
+    carry = NetworkSource("Portages", gpd.GeoDataFrame(geometry=[LineString([end, (end.x + 30, end.y + 5)])], crs=CRS), kind="portage")
+    network = build_network([shore, carry], metric_crs=CRS)
+    to_page, from_page = paddle_geometry._page_round_trip(CRS)
+    dam_xy = np.array([[dam.x, dam.y]])
+
+    def least(frame) -> float:
+        runs = [paddle_geometry.decoded(shapely.get_coordinates(g), to_page, from_page) for g in frame.geometry]
+        return min(paddle_geometry._dam_clearance(run, dam_xy) for run in runs)
+
+    paddled = network.edges[network.edges["kind"] == PADDLE]
+    assert least(paddled) < water.DAM_CUT_M
+    moved, figures = paddle_network.written_off_the_discs(network, np.array([dam]))
+    assert figures["nodes moved"] == 1 and figures["edge ends moved"] == 2 and figures["line vertices moved"] == 0
+    assert least(moved.edges[moved.edges["kind"] == PADDLE]) >= water.DAM_CUT_M
+    # The node and both edges' ends moved together, by less than a grid step's diagonal, onto a point the grid keeps.
+    node = int(paddled["to_node"].iloc[0]) if paddled.geometry.iloc[0].coords[-1] == end.coords[0] else int(paddled["from_node"].iloc[0])
+    at = np.asarray(moved.nodes.geometry.loc[node].coords[0])
+    assert np.hypot(*(at - end.coords[0])) < 0.2
+    assert np.allclose(paddle_geometry.decoded(at[None, :], to_page, from_page)[0], at, atol=1e-6)
+    for row in moved.edges.itertuples():
+        coords = np.asarray(row.geometry.coords)
+        touching = [coords[0] if row.from_node == node else None, coords[-1] if row.to_node == node else None]
+        assert all(np.array_equal(c, at) for c in touching if c is not None)
+        assert row.length_m == pytest.approx(row.geometry.length)
+
+
+def test_without_dams_the_graph_is_the_same_object():
+    # Abisko and Lomsdal-Visten have no dam input: their switch-on graphs cannot change.
+    network = build_network(
+        [NetworkSource("Shore", gpd.GeoDataFrame(geometry=[LineString([(0, 0), (50, 0)])], crs=CRS), kind=PADDLE)], metric_crs=CRS
+    )
+    same, figures = paddle_network.written_off_the_discs(network, np.empty(0, dtype=object))
+    assert same is network and figures["nodes moved"] == 0

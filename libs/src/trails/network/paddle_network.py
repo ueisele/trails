@@ -833,6 +833,174 @@ def stream_edges(probed: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     return streams
 
 
+#: How far round the rounded grid point a node cut at a disc looks for one outside it: 4 grid steps
+#: each way, about 0.44 m of latitude, where the page's own rounding moves a point by at most 0.07 m.
+DISC_GRID_STEPS = 4
+#: A line end within this of a disc's circle is a cut end: the grid moves one by at most 0.07 m.
+DISC_END_M = 0.5
+#: Passes over the discs: a move can leave a short edge's other end to repair.
+DISC_PASSES = 6
+
+
+def written_off_the_discs(network: Network, dams: np.ndarray) -> tuple[Network, dict[str, int]]:
+    """Write every paddled vertex the page would round into a dam disc on a grid point outside it.
+
+    The analytic cut (``water._outside_dams``) ends a line exactly on the 25 m circle, and the page's
+    1e-6 degree grid then rounds that end inward about half the time: phase 9's graph has 284 such
+    ends on Malingsbo-Kloten, up to 5.6 cm inside. Plan §4.4 asks for none. So before the checks,
+    wherever a written paddled segment enters a disc, each of its two vertices that lies on or within
+    ``DISC_END_M`` of a circle moves to the grid point nearest its own position, among the rounded
+    point and its neighbours, that lies outside every disc and keeps the written segments on either
+    side of it outside too. A line end is a node: it moves for every paddled edge at the node at
+    once, and every edge there, carries and launches included, moves its end with it, so nothing
+    comes apart. A vertex inside a line (a contour arc running along the circle) moves for its own
+    line. Costs follow the length. The point is a grid point read back into the metric CRS, so the
+    page writes it unchanged. One move can leave a neighbour to repair, so this repeats until nothing
+    is left, at most ``DISC_PASSES`` times. Only the switch-on build calls this: main's graph keeps
+    its rounded ends.
+
+    Args:
+        network: The graph as noded, metric
+        dams: Dam points, metric; none leaves the network as it is, the same object
+
+    Returns:
+        The network and what was moved: nodes, edge ends, vertices inside a line, and paddled
+        segments still entering a disc with neither vertex on a circle, which the checks then count
+    """
+    figures = {"nodes moved": 0, "edge ends moved": 0, "line vertices moved": 0, "paddled segments inside a disc off its circle": 0}
+    if not len(dams):
+        return network, figures
+    edges, nodes = network.edges, network.nodes
+    to_page, from_page = pg._page_round_trip(edges.crs)
+    dam_xy = shapely.get_coordinates(dams)
+    dam_tree = shapely.STRtree(dams)
+    quantum = _coordinate_quantum()
+    steps = np.arange(-DISC_GRID_STEPS, DISC_GRID_STEPS + 1)
+    offsets = np.array([(i, j) for i in steps for j in steps], dtype=float) * quantum
+
+    def written(xy: np.ndarray) -> np.ndarray:
+        return pg.decoded(np.atleast_2d(xy), to_page, from_page)
+
+    def clear(one: np.ndarray, other: np.ndarray) -> float:
+        return float(pg._distance_to_segment(dam_xy, one, other).min())
+
+    def depth(xy: np.ndarray) -> float:
+        return float(np.hypot(*(dam_xy - xy).T).min())
+
+    def outside(own: np.ndarray, neighbours: list[np.ndarray]) -> np.ndarray:
+        """The grid point nearest ``own`` outside every disc whose segments to the neighbours stay out too.
+
+        Where no such point is in reach (a short chord along a circle, both of whose vertices the grid
+        pulls in), the point outside every disc that leaves those segments the most room, so the next
+        pass can move the neighbour.
+        """
+        lon, lat = to_page.transform(own[0], own[1])
+        grid = np.rint(np.array([lon, lat]) / quantum) * quantum + offsets
+        x, y = from_page.transform(grid[:, 0], grid[:, 1])
+        candidates = np.column_stack([x, y])
+        candidates = candidates[np.argsort(np.hypot(*(candidates - own).T), kind="stable")]
+        best, room = None, -np.inf
+        for candidate in candidates:
+            if depth(candidate) < DAM_CUT_M:
+                continue
+            least = min((clear(candidate, other) for other in neighbours), default=np.inf)
+            if least >= DAM_CUT_M:
+                return np.asarray(candidate, dtype=float)
+            if least > room:
+                best, room = candidate, least
+        if best is None:
+            raise ValueError(f"no page grid point outside the dam disc near {own.tolist()} within {DISC_GRID_STEPS} steps")
+        return np.asarray(best, dtype=float)
+
+    geometries = edges.geometry.to_numpy().copy()
+    kinds = edges["kind"].to_numpy()
+    ends = edges[["from_node", "to_node"]].to_numpy(dtype=int)
+    ends_of: dict[int, list[tuple[int, bool]]] = defaultdict(list)
+    for position, (a, b) in enumerate(ends.tolist()):
+        ends_of[a].append((position, True))
+        ends_of[b].append((position, False))
+    paddled = np.flatnonzero(kinds == PADDLE)
+    near = paddled[np.unique(dam_tree.query(geometries[paddled], predicate="dwithin", distance=DAM_CUT_M + DISC_END_M)[0])]
+    moved_nodes: set[int] = set()
+    nodes_xy: dict[int, np.ndarray] = {}
+    touched: set[int] = set()
+    vertices = 0
+
+    def set_vertex(position: int, index: int, xy: np.ndarray) -> None:
+        line = geometries[position]
+        coords = shapely.get_coordinates(line, include_z=line.has_z).copy()
+        coords[index, :2] = xy
+        geometries[position] = LineString(coords)
+        touched.add(position)
+
+    for _ in range(DISC_PASSES):
+        at_nodes: set[int] = set()
+        in_lines: set[tuple[int, int]] = set()
+        off_circle = 0
+        for position in near.tolist():
+            run = written(shapely.get_coordinates(geometries[position]))
+            for k in range(len(run) - 1):
+                if clear(run[k], run[k + 1]) >= DAM_CUT_M:
+                    continue
+                on_circle = [index for index in (k, k + 1) if depth(run[index]) < DAM_CUT_M + DISC_END_M]
+                if not on_circle:
+                    off_circle += 1
+                for index in on_circle:
+                    if index == 0 or index == len(run) - 1:
+                        at_nodes.add(int(ends[position, 0 if index == 0 else 1]))
+                    else:
+                        in_lines.add((position, index))
+        if not at_nodes and not in_lines:
+            figures["paddled segments inside a disc off its circle"] = off_circle
+            break
+        for node in sorted(at_nodes):
+            own = nodes_xy.get(node, np.asarray(shapely.get_coordinates(nodes.geometry.loc[node])[0]))
+            neighbours = []
+            for position, starts in ends_of[node]:
+                if kinds[position] == PADDLE:
+                    coords = shapely.get_coordinates(geometries[position])
+                    neighbours.append(written(coords[1 if starts else len(coords) - 2])[0])
+            best = outside(own, neighbours)
+            moved_nodes.add(node)
+            nodes_xy[node] = best
+            for position, starts in ends_of[node]:
+                set_vertex(position, 0 if starts else -1, best)
+        for position, index in sorted(in_lines):
+            coords = shapely.get_coordinates(geometries[position])
+            neighbours = [written(coords[index - 1])[0], written(coords[index + 1])[0]]
+            set_vertex(position, index, outside(coords[index], neighbours))
+            vertices += 1
+    else:
+        raise ValueError(f"paddled vertices still written inside a dam disc after {DISC_PASSES} passes")
+    if not touched:
+        return network, figures
+    lengths = edges["length_m"].to_numpy(dtype=float).copy()
+    costs = edges["cost"].to_numpy(dtype=float).copy()
+    for position in sorted(touched):
+        new_length = float(geometries[position].length)
+        if lengths[position] > 0:
+            costs[position] *= new_length / lengths[position]
+        lengths[position] = new_length
+    figures["nodes moved"] = len(moved_nodes)
+    figures["edge ends moved"] = sum(len(ends_of[node]) for node in moved_nodes)
+    figures["line vertices moved"] = vertices
+    edges = edges.copy()
+    edges["geometry"] = gpd.GeoSeries(geometries, index=edges.index, crs=edges.crs)
+    edges["length_m"] = lengths
+    edges["cost"] = costs
+    nodes = nodes.copy()
+    if moved_nodes:
+        moved_index = sorted(moved_nodes)
+        nodes.loc[moved_index, "geometry"] = gpd.GeoSeries([Point(nodes_xy[node]) for node in moved_index], index=moved_index, crs=nodes.crs)
+    return replace(network, edges=edges, nodes=nodes), figures
+
+
+def _coordinate_quantum() -> float:
+    from trails.visualization.encoding import DEFAULT_COORDINATE_QUANTUM
+
+    return float(DEFAULT_COORDINATE_QUANTUM)
+
+
 def validate(network: Network, assembled: Assembled) -> dict[str, Any]:
     """The gates again on the built network, as the page will write it.
 

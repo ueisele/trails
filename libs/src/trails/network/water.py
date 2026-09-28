@@ -634,6 +634,9 @@ def build(
         # Every bridge is the build's above, carried over as a line; none is inferred again.
         network = node(sources, bridge_m=0.0)
         print(f"  Combined graph build with the line off the bank: {time.perf_counter() - started:.3f} s; {len(network.edges):,} edges")
+        # The page's grid would round a cut end into its dam's disc; the switch-off graph keeps phase 9's ends.
+        network, assembled.evidence["written off the discs"] = paddle_network.written_off_the_discs(network, assembled.dams)
+        print(f"  Line off the bank, ends written off the dam discs: {assembled.evidence['written off the discs']}")
         assembled.evidence["validation"] = paddle_network.validate(network, assembled)
         print(f"  Line off the bank after noding: {assembled.evidence['validation']}")
     report(network)
