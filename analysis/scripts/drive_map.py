@@ -8172,23 +8172,67 @@ def lake_bank_readings(page: Any, got: dict[str, Any]) -> list[Reading]:
     ]
 
 
+#: The zoom a finger puts the offset readings' taps down at (phase 12f's `OffsetTaps` read z17 too).
+FINGER_ZOOM = 17
+
+
+def exact_tap_land(got: dict[str, Any], what: str) -> list[Reading]:
+    """Land on a leg between exact bank taps, on a page with the line off the bank.
+
+    An exact position keeps its meaning (§4.3): it stays raw and reaches the line 15 m out by a
+    connector, which may cross a dry cell of the 25 m water grid. Phase 8's allowance holds it:
+    at most one grid cell per connector end.
+    """
+    route = got["routing"]
+    walked = got["state"]["walked"]
+    return [
+        Reading(f"{what} needs no land beyond a grid cell per connector end", walked <= route["allowance"], True),
+        noted(f"{what}: land / allowance / connectors, m", [walked, route["allowance"], route["connectors"]]),
+    ]
+
+
+def finger_tap_readings(
+    page: Any, points: tuple[tuple[float, float], tuple[float, float]], what: str, figure: str
+) -> tuple[dict[str, Any], list[Reading]]:
+    """The same leg from finger taps beside the exact ones: they take the line off the bank, and need no land."""
+    got = read_water_leg(page, points, raw_zoom=FINGER_ZOOM, measure_shore=True)
+    s = got["state"]
+    return got, water_leg_readings(got, f"{what}, finger taps") + [
+        Reading(f"{what}, finger taps: both taps take a travel line", all(p["node"] >= 0 or p.get("edge", -1) >= 0 for p in s["points"]), True),
+        Reading(f"{what}, finger taps: no land", s["walked"], 0),
+        stands(figure, round(s["crossed"], 3), within=0.001),
+    ]
+
+
 def a_kayak_way_follows_the_shore(page: Any) -> Check:
     """The lake's shore is the way, with no carry hidden in its water metres."""
     name = "a kayak way follows the shore"
     if SCENE.kayak_shore is None:
         return Check(name, skipped="this scene has no kayak shore measured after the phase 5 rebuild")
     leg = SCENE.kayak_shore
-    got = read_water_leg(page, leg.points, measure_shore=True)
+    offset = water_roles(page)
+    got = read_water_leg(page, leg.points, measure_shore=True, measure_routing=offset)
     s = got["state"]
+    if offset:
+        # The exact bank taps stay raw beside the line off the bank; finger taps take it.
+        land = exact_tap_land(got, "the shore leg")
+        finger, beside = finger_tap_readings(page, leg.points, "the shore leg", "kayak shore water, finger taps, m")
+        beside += lake_bank_readings(page, finger) + [
+            Reading("the shore leg, finger taps: entirely paddled", all(p["kind"] == "paddled" for p in finger["state"]["legs"][0]["parts"]), True)
+        ]
+    else:
+        land = [
+            Reading("the shore leg is entirely paddled", all(p["kind"] == "paddled" for p in s["legs"][0]["parts"]), True),
+            Reading("the shore leg carries no land metres", s["walked"], 0),
+        ]
+        beside = []
     return Check(
         name,
         water_leg_readings(got, "shore")
         + lake_bank_readings(page, got)
-        + [
-            Reading("the shore leg is entirely paddled", all(p["kind"] == "paddled" for p in s["legs"][0]["parts"]), True),
-            Reading("the shore leg carries no land metres", s["walked"], 0),
-            stands("kayak shore water, m", round(s["crossed"], 3), within=0.001),
-        ],
+        + land
+        + [stands("kayak shore water, m", round(s["crossed"], 3), within=0.001)]
+        + beside,
     )
 
 
@@ -8197,9 +8241,21 @@ def a_bay_is_cut_and_a_lake_is_not(page: Any) -> Check:
     name = "a bay is cut and a lake is not"
     if SCENE.kayak_bay is None or SCENE.kayak_shore is None:
         return Check(name, skipped="this scene has no kayak bay and lake measured after the phase 5 rebuild")
-    bay = read_water_leg(page, SCENE.kayak_bay.points)
+    offset = water_roles(page)
+    bay = read_water_leg(page, SCENE.kayak_bay.points, measure_routing=offset)
     lake = read_water_leg(page, SCENE.kayak_shore.points, measure_shore=True)
     b, s = bay["state"], lake["state"]
+    if offset:
+        # The exact bank taps stay raw beside the line off the bank; finger taps take it.
+        land = exact_tap_land(bay, "cutting the bay")
+        finger, beside = finger_tap_readings(page, SCENE.kayak_bay.points, "the bay", "kayak bay water, finger taps, m")
+        f = finger["state"]
+        beside += [
+            Reading("the bay, finger taps: shorter over water than round the shore", 0 < f["crossed"] < SCENE.kayak_bay.shore_m, True),
+            Reading("the bay, finger taps: an open-water chord", f["tally"]["sources"].get("Open water", 0) > 0, True),
+        ]
+    else:
+        land, beside = [Reading("cutting the bay needs no land", b["walked"], 0)], []
     return Check(
         name,
         water_leg_readings(bay, "bay")
@@ -8209,14 +8265,15 @@ def a_bay_is_cut_and_a_lake_is_not(page: Any) -> Check:
             Reading("the bay's direct line is mostly water", bay["direct"]["water"] > bay["direct"]["metres"] / 2, True),
             Reading("the bay is shorter over water than round the shore", 0 < b["crossed"] < SCENE.kayak_bay.shore_m, True),
             Reading("the bay takes an open-water chord", b["tally"]["sources"].get("Open water", 0) > 0, True),
-            Reading("cutting the bay needs no land", b["walked"], 0),
+            *land,
             Reading("the lake's direct line is mostly water", lake["direct"]["water"] > lake["direct"]["metres"] / 2, True),
             Reading("the lake goes farther than that direct crossing", s["crossed"] > lake["direct"]["metres"], True),
             Reading("following the lake needs no land", s["walked"], 0),
             noted("the measured shore round the bay, m", SCENE.kayak_bay.shore_m),
             noted("the direct lake crossing, m", lake["direct"]),
             stands("kayak bay water, m", round(b["crossed"], 3), within=0.001),
-        ],
+        ]
+        + beside,
     )
 
 
@@ -8924,8 +8981,11 @@ def a_paddled_profile_is_flat(page: Any) -> Check:
     if SCENE.kayak_shore is None or SCENE.kayak_bay is None:
         return Check(name, skipped="this scene has no kayak lake profiles measured after the phase 5 rebuild")
     readings: list[Reading] = []
+    # With the line off the bank the lake's profile is read from finger taps, which take the line;
+    # the exact bank taps reach it over a grid cell of land (`exact_tap_land`).
+    finger = FINGER_ZOOM if water_roles(page) else None
     for label, leg in (("shore", SCENE.kayak_shore), ("bay", SCENE.kayak_bay)):
-        got = read_water_leg(page, leg.points)
+        got = read_water_leg(page, leg.points, raw_zoom=finger)
         s, h = got["state"], got["heights"]
         readings += water_leg_readings(got, label) + [
             Reading(f"{label}: this profile is all water", s["crossed"] > 0 and s["walked"] == 0, True),
