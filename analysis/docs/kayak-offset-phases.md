@@ -1654,6 +1654,64 @@ cut again by the second noding, every word else and the GPX description unchange
 they are 4,686.65 / 4,317.70 ms. The Lomsdal-Visten p95 first reported in this run's stop (4,871.70 /
 4,585.65) was the offered column.
 
+**Built 2026-09-28 — Malingsbo-Kloten: the second map paddles the line off the bank.** The park table's
+`paddle_offset` is on for Malingsbo-Kloten, on main `d3b8848` (the dam rounding `52c07b4`, the same-arc join
+`8c93e9c`, the anchors and the strict gate `860bc5e` / `6641db1`, and the dead-end and coincident-node fix
+`d3b8848`, all of them first found on this map). Evidence: `~/mockups/kayak-mode/offset-plan/phase-12g-mk/`
+(`README.md` first, `scene-diff.md` for the figures). Page `173ad07ad4c6`, built once and driven as built.
+
+| Against 12a's baseline | Baseline | Switch on | Budget |
+|---|---:|---:|---:|
+| Graph build s | 388.0 | 728.2 (1.88×) | 1,164 (3×) |
+| Edges / nodes / vertices | 294,642 / 148,291 / 980,270 | 347,158 / 181,435 / 1,112,842 (1.178 / 1.224 / 1.135) | 1.5× |
+| Page Brotli bytes | 8,006,978 | 8,574,125 (+567,147) | +1.0 MB |
+| Graph Brotli bytes | 5,785,282 | 6,351,285 | |
+| Kayak p95 ms, Stay on paths off / on | 2,069.00 / 2,124.20 | 2,774.30 / 2,696.25 | 3,103.50 / 3,186.30 |
+| Walking p95 ms, off / on (informational) | 1,014.35 / 802.10 | 1,376.65 / 1,121.55 | |
+
+p95 is the built rule (landings skipped), 200 phase-10 pairs after four warm-ups, Firefox 153, under the shared
+lock. Peak RSS of the page build 3,438.5 MB.
+
+*The gates of §4.4.* Shore after noding and the grid at least 12.9566 m from the unsimplified bank, no segment under
+12 m, deviation bound 2.0929 m (0.1 m samples; the contour's own proved bound at most 2.0991 m). The middle holds on
+every piece; 3,107 of 3,107 cross sections. No seam. Through 765 of 842, bays 2,453 of 2,559, islands 1,201 alone
+and 173 cut: every failure is cut by the crop or a dam, none otherwise. No paddled edge inside a dam disc on the
+page grid, least 25.0 m on all five sources (Streams 25.0009 m); the dam repair moved 139 nodes and 268 edge ends,
+the same-arc join made 12 joins (219.9 m, least water width 0.066 m at dam 63), no split arc and no bypass on any of
+the 57 dams with more than one arc. The strict gate: no loose carry, launch or Landing water end; 11 at the crop.
+12b's contact at 15.306432 60.131638 is noded. Stream directions: 345 of 345 chains as main's, 175 one way; lake
+planes 600 of 600 (main's lake-338, a 69 m crop sliver, has no line). Walking keeps 9,682.575 km.
+
+*Correctness.* Phase 11's MK harness, 1,008 comparisons in four settings on this page: 0 mismatches, largest error
+1.46 × 10⁻¹¹. Against main's page, 158 of 252 kayak routes change (117 in land price): paddle 4,475.8 → 4,465.6 km,
+carry 1,040.0 → 1,038.2 km, straight connectors 218.0 → 246.5 km, the last because 62 endpoints that stood on main's
+bank line now stand raw beside the line 15 m out. Against 12a's labels the kayak land price rises on 74 routes
+(median 2.3, most 132.4) and falls on 44. Walking land never changes; walking costs move by −0.9 to +1.7 % where
+legs join and turn at water-only nodes (Uwe's walking question, informational here).
+
+*The drawn line at z17/z18*, measured on the page: the drawn Shore keeps 12.956–13.839 m from the source bank on
+every leg, drawn within 0.636 m (z17) / 0.267 m (z18) of the unsimplified part. Dam 39's joined narrow is paddled
+end to end (stream, Narrow water, Shore; 290.9 m, 0 on foot); the carry leg has network paddle on both sides.
+
+*The scene.* `OffsetTaps` chosen on this page (`choose_taps.py`) on Storsjön; the goal lies round a headland from the
+first bank tap, so no straight crossing joins them. The line off the bank renumbers three fixture edges, each the
+same edge vertex for vertex: the Kloten road 45537 → 45687, its northern launch 284183 → 338743, the long edge
+67986 → 68169. The moved figures are in `scene-diff.md` and the second commit. The three phase-9 repaired stream
+joins, read from exact taps: join 1's water tap lies below dam 39, so the leg carries round it (41.146 m on foot on
+main, 47.619 m now); joins 2 and 3 are paddled but for 1.936 / 1.599 m of exact-tap connector over a dry cell.
+
+*Drives on this page.* The kayak and entry selection with the two offset readings, twice: 574 readings, none broken,
+none moved (after the figures' commit); `command make drive-all` once: 1,983 readings, none broken, 4 skipped by the
+scene, one figure moved, the dry walking way's figures page, 22,971.1396 m against 22,971.1376 on main. The drive's
+readings for pages with roles are Abisko's (the lake bank, exact and finger taps, a bay cut by a water connector).
+
+*Recorded, not changed here (review, 2026-09-28):* 17 edges of no length on this graph (main has 49, all bridges):
+14 lie 25.00–25.09 m from a dam, two nodes of a short edge the dam repair wrote onto one grid point; one of them is
+a one-way stream edge whose direction is undefined (14.987443 59.875024). With Abisko's 67 Shore edges that collapse
+onto the grid, and main's 154 walking node pairs on one point, they wait for a cleanup with the walking phase.
+
+*For Lomsdal-Visten:* Norway has no dams, so the rounding repair and the same-arc join change nothing there.
+
 ### Phase 12h — Review the three maps as one feature
 
 *Reviewing session.* *Files:* final approval/build notes in

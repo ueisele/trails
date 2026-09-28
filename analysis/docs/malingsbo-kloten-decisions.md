@@ -250,7 +250,9 @@ page as the register spelt it, drawn or not.
   the figures page and the GPX in words. The water stays out of the walking length, as it
   always was — a lake is crossed by boat, a river on foot — and the last row at the foot
   equals the heading's two lengths to the metre. A kayak mode, where the water is the way,
-  comes after the map is finished (plan §5).
+  comes after the map is finished (plan §5). Built (`kayak-mode-phases.md`), and since phase 12g (2026-09-28) it paddles
+  a line 15 m off the bank on this map, joined again along a dam's disc where the disc cut it on one side
+  (`kayak-offset-phases.md`, phase 12g).
 - ~~The phone readings, once published.~~ Uwe, 2026-09-21: *funktioniert korrekt*.
 - ~~The icon.~~ Uwe, 2026-09-21: candidate A, the one published, is the pick.
 

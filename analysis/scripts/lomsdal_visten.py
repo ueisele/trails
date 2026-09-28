@@ -288,6 +288,8 @@ PARKS: dict[str, Park] = {
         naturkartan="malingsbo-kloten-naturkartan.toml",
         county=("örebro", "dalarna", "västmanland"),
         water_municipalities=("1864", "1885", "1904", "1962", "1982", "2061", "2083", "2085"),
+        # Phase 12g switches the line 15 m off the bank on here (kayak-offset-phases.md).
+        paddle_offset=True,
     ),
 }
 
