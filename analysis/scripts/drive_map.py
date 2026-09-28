@@ -136,8 +136,8 @@ class OffsetTaps:
     offshore: tuple[float, float]
     #: On an island's bank where another island's or the mainland's line lies within 17.1 m.
     island: tuple[float, float]
-    #: On a stream above its mouth.
-    stream: tuple[float, float]
+    #: On a stream above its mouth; None where the map's water has no streams (Norway's N50 has none).
+    stream: tuple[float, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -354,16 +354,27 @@ SCENES: dict[str, Scene] = {
         kayak_bay=WaterLeg(((65.330996, 12.938274), (65.325983, 12.939154)), shore_m=2108.97192778139),
         kayak_portage=((65.742431, 13.002636), (65.734636, 13.004338)),
         kayak_portage_path_m=959.6899007960781,
+        # Chosen on the switch-on page of phase 12g (offset-plan/phase-12g-lv/choose_taps.py, 12f's
+        # script), in the water of the kayak shore leg: bank taps 1.5 m into the water with no way
+        # within 26 m (a z15 finger is 23.9 m here), the Shore line 12.6 and 13.5 m out, 469 m
+        # apart; a channel whose Narrow water is 1.2 m off; a path 1 m away with the line 13.9 m
+        # out; a launch; open water with no line within 30 m; an island's bank with its own line
+        # 13.3 m out and the next 19.0 m. N50 has no streams, so there is no stream tap.
+        offset_taps=OffsetTaps(
+            near_bank=(65.3307778, 12.9378933),
+            goal=(65.3277509, 12.9308859),
+            narrow=(65.3249274, 12.9457425),
+            land=(65.3226564, 12.9606967),
+            launch=(65.333248, 12.9436446),
+            offshore=(65.3305089, 12.9437915),
+            island=(65.3307421, 12.9464362),
+        ),
         # The level channel is Korslången's; the phase-10 road and switch fixtures are at Kloten.
         skips=(
             "a level channel is paddled both ways",
             "a kayak launches from the road",
             "the kayak path switch changes the carry",
             "a way enters the middle of a road",
-            # Phase 12f's readings of the line off the bank run only on a page built with
-            # the switch on; 12g switches each map on and takes these two out.
-            "the tap takes the line off the bank",
-            "the line off the bank is counted once",
         ),
         long_chain="trail-group-ut-no-414306-7244296-42442",
         position=(65.55, 13.05),
@@ -8641,7 +8652,9 @@ def the_tap_takes_the_line_off_the_bank(page: Any) -> Check:
         return Check(name, skipped="this scene has no taps for the line off the bank yet (12g switches a map on)")
     band = PADDLE_OFFSET_M + CONTOUR_DEVIATION_M
     readings: list[Reading] = []
-    order = ("near_bank", "goal", "narrow", "land", "launch", "offshore", "island", "stream")
+    order: tuple[str, ...] = ("near_bank", "goal", "narrow", "land", "launch", "offshore", "island", "stream")
+    if taps.stream is None:
+        order = order[:-1]
     for zoom in (17, 15):
         got = placed_taps(page, [getattr(taps, key) for key in order], zoom=zoom)
         read = dict(zip(order, got["points"], strict=True))
@@ -8672,10 +8685,13 @@ def the_tap_takes_the_line_off_the_bank(page: Any) -> Check:
         readings.append(Reading(f"{prefix} offshore: on no travel line", "travel" in roles["offshore"], False))
         if not offshore["lines"]:
             readings.append(Reading(f"{prefix} offshore: stays where it was put", offshore["moved"], 0, within=0.001))
-        readings.append(Reading(f"{prefix} stream: on the stream", roles["stream"], {"stream"}))
-        stream_lines = [line for line in read["stream"]["lines"] if line["role"] == "stream"]
-        readings.append(Reading(f"{prefix} stream: part way along its edge", read["stream"]["edge"] >= 0 and bool(stream_lines), True))
-        readings.append(noted(f"{prefix} stream: one way", [line["oneWay"] for line in stream_lines]))
+        if taps.stream is None:
+            readings.append(noted(f"{prefix} stream: none in this map's water", None))
+        else:
+            readings.append(Reading(f"{prefix} stream: on the stream", roles["stream"], {"stream"}))
+            stream_lines = [line for line in read["stream"]["lines"] if line["role"] == "stream"]
+            readings.append(Reading(f"{prefix} stream: part way along its edge", read["stream"]["edge"] >= 0 and bool(stream_lines), True))
+            readings.append(noted(f"{prefix} stream: one way", [line["oneWay"] for line in stream_lines]))
         banks = from_bank_m([(read[key]["lat"], read[key]["lon"]) for key in ("near_bank", "goal", "narrow")])
         readings.append(noted(f"{prefix}: near_bank, goal, narrow from the source bank, m", banks))
         for key, metres in zip(("near_bank", "goal"), banks[:2], strict=True):

@@ -242,6 +242,8 @@ PARKS: dict[str, Park] = {
         companions=maps.Companions.of("lomsdal-visten"),
         bounds=None,
         ut_routes="lomsdal-visten-ut-routes.toml",
+        # Phase 12g: built, gated and driven with the line off the bank.
+        paddle_offset=True,
     ),
     "abisko": Park(
         name="Abisko",

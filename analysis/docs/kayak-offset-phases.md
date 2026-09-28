@@ -1573,6 +1573,87 @@ edges 44,994 → 45,138), which resamples it, 16,700.517 → 16,700.507 m.
 *For MK and Lomsdal-Visten.* The three reading commits; a scene carry may likewise stop carrying where
 Narrow water joins its lakes; exact bank taps may cross a grid cell of land.
 
+**Built 2026-09-28 — Lomsdal-Visten.** Switched on in the park table (`paddle_offset=True`) and built on
+main `6641db1`. Evidence in scratch, `~/mockups/kayak-mode/offset-plan/phase-12g-lv/`; every heavy step
+ran as a transient unit under `MemoryMax=8G` and the shared heavy lock.
+
+*The switch off first.* 12e-2's faster noding had been proved byte-identical only on the two Swedish maps;
+built with the switch off before anything else, Lomsdal-Visten's graph header and data equal main's page.
+
+*What the first build found, and the two shared fixes it needed.* The first switch-on build left 1,152
+carry and launch ends meeting nothing, though every contact counted as mapped: 1,119 lay 1–6 cm from a
+centre branch's end, the branch written through the page's grid off the anchor it served (`860bc5e`,
+which also adds the gate after noding); 28 were carries main's graph already never joined to its water, a
+carry end on a Shore vertex on a node of its own; one was a portage path whose 0 m bridge to its road the
+second noding dropped (`6641db1`: such carry ends are contacts, zero-length bridges are bridged again).
+Now: 0 loose carry, launch and Landing water ends, 4 at the crop (2 carries, 2 launches, one of them on
+the `lake-609` sliver); the 28 have Landing water spurs of 0.98–17.45 m (median 13.5); all 155 of main's
+242 bridges under 1 µm that join two ways are joined again (71 were lost before `6641db1`), the other
+87 have an end on main's water and are the line's to move or drop. Main's switch-off graph keeps its 28.
+
+| Lomsdal-Visten | Baseline (12a) | Switch on | Budget |
+|---|---:|---:|---:|
+| Graph edges / nodes / vertices | 402,240 / 190,591 / 1,301,439 | 483,984 / 241,230 / 1,498,054 (1.203 / 1.266 / 1.151×) | 1.5× |
+| Page Brotli bytes (q11) | 7,778,287 | 8,781,069 (+1,002,782) | +1.5 MB |
+| Graph build s | 1,025.4 | 1,456.9 (1.42×) | 3,076.2 |
+| Kayak p95 ms, Stay on paths off / on (built rule) | 3,779.40 / 3,724.15 | 4,675.10 / 4,308.40 | 5,669.10 / 5,586.23 |
+| Walking p95 ms, off / on, the same day | 3,428.90 / 1,787.05 (main's page) | 4,349.10 / 2,520.10 | — |
+
+*Build, per component* (s / peak RSS MB): loading 116.1 / 1,326; walking noding 59.7; carries 21.4,
+launches 18.3; noding with them 147.5 / 1,720; contours 551.5 / 2,605 (the sea, as 12c-2 measured), landings
+19.9, chords 23.8, assembly 8.9; noding again 156.2 / 2,927; checks after noding 14.7; the water build
+peaks at 6,009 MB after them, under the 8 GiB cap. Page `067c7632…`.
+
+*Gates (§4.4).* Shore at least 12.9553 m from the unsimplified bank after the grid, none under 12 m,
+deviation bound 2.1 m; Narrow water at most 0.983 m off the middle (share 0.097), 4,122 of 4,122
+cross sections within the gate, worst 0.931 m in 14.78 m of water at 13.555126 65.485547; dry metres
+82.881 (Narrow water, excursion at most 0.058 m), 0 on Shore and Open water; no dams in this source set.
+Witnesses: islands 0 failures (2,186 cut by the crop, 1,755 alone); through 1,267 of 1,878 connected, every
+other failure cut by the crop but the loop at 12.152487 65.643134, a 286 m² pocket beside a 6.4 ha island
+with one mouth, its two contacts 3.7 cm apart, kept as a bay (review accepted it, 2026-09-28); bays 4,904
+of 5,775 reached, the rest cut by the crop. The two seam rows lie 8,966 m outside the map; none inside.
+Lake planes: 983 of 983 as before, `lake-609` gone (the crop sliver, 50 m of water). The sea stays at
+0 m and its owner unchanged; no streams in N50. The seven long Open water links 12d made (67–1,582 m)
+lie wholly in N50's water.
+
+*Correctness.* Phase 11's Lomsdal-Visten harness, 960 comparisons, on the switch-on page: 0 mismatches,
+largest error 5.8 × 10⁻¹¹; on the switch-off page 960 of 960 and equal to 12a's frozen labels. Entry
+candidates on the 894 raw kayak endpoints: 231,104 segments with landings skipped, 232,016 offered;
+no `d` moves.
+
+*Routes against main* (the harness pairs laid out by phase 10's measure, corrected for interior entries).
+Kayak: 132 of 240 change (Stay on paths on: 137); paddled 3,137.1 → 3,209.2 km, carried 2,172.1 →
+2,093.6 km, the sum of lengths +19.2 km; cost falls on 93 and rises on 39. The largest increases are ways
+that got cheaper by paddling farther (radius 33: 22.4 → 47.7 km at 128,778 → 52,743; phase-10 pair 19:
+45.7 → 65.7 km at 212,519 → 82,243), where the line and its links reach water the old graph reached
+only over land; and ways in the open sea whose entry moved with the line (pair 53: +19.3 km, cost
+69,402 → 92,358). Of the seven long links, the 813 m one is chosen by one pair in both settings.
+Ferries: all 21 ferry chains route end to end walking and paddling on both pages; walking takes the
+whole ferry on 18, the kayak on 8, both before and after. Walking (informational, Uwe's question): 108
+of 240 walking routes change by cost, most by the finer noding's rounding (55 same metres); lengths
+−2.8 km in all; the recorded fixed-input walking routes all stay within max(2 %, 50 m), largest 5.3 m.
+
+*Drawn line.* Along the lake (the scene's offset taps, a 485.5 m way) Leaflet's drawn line at z17 lies
+13.10–14.81 m (least, median) from N50's bank and at z18 13.06 m least; no sample on land; the drawn line
+strays at most 0.30 m (z17) and 0.13 m (z18) from the plan's track.
+
+*Drives.* The scene has its own `OffsetTaps` (no stream: N50 has none; `stream` is optional now) and the
+two offset readings run. The exact bank taps of the shore and bay legs keep their meaning: on this page
+they reach the line about 15 m out by raw connectors, 16.130 m (shore) and 7.916 m (bay) of them on the
+water grid's dry cells, within the allowance of a grid cell per connector end. Finger taps beside them
+take the line and need no land; across the bay the way between them is one straight water connector,
+priced as a chord is (the shared bank-leg reading from Abisko's run, which accepts either). The moved
+figures are in the second commit and `scene-diff.md`; the scene's carry is paddled on both sides (432.9
+and 1,140.8 m with Stay on paths off, 227.3 and 235.4 m with it on). The selected kayak readings, 386,
+are green twice on the final page; `command make drive-all` once over it reads 1,821, 0 broken, one figure
+moved and updated with the others: the dry way's figures page counts 7,644 points instead of 7,641, the ways
+cut again by the second noding, every word else and the GPX description unchanged.
+
+*Timing labels.* 12f's timing script had its two landing labels swapped: the build's rule is
+`time(c, true)`, which keeps the landing mask. The p95s above use it; with every landing segment offered
+they are 4,686.65 / 4,317.70 ms. The Lomsdal-Visten p95 first reported in this run's stop (4,871.70 /
+4,585.65) was the offered column.
+
 ### Phase 12h — Review the three maps as one feature
 
 *Reviewing session.* *Files:* final approval/build notes in

@@ -105,6 +105,8 @@ would draw it without a change.
 
 ## 5. Changes
 
+- 2026-09-28 — phase 12g, Lomsdal-Visten: switched on and built on main `6641db1`. 0 of 960 comparisons differ from the reference; kayak p95 4,675.10 / 4,308.40 ms (budget 5,669.10 / 5,586.23); 1.20× the edges and +1.0 MB of page; every carry and launch reaches the water, the 28 main never joined among them. The scene's exact bank taps keep their meaning, finger taps beside them read the line.
+
 - 2026-09-28 — phase 12g, Abisko: the line off the bank is switched on for Abisko. All §4.4 gates hold, 960 of 960 comparisons equal the reference, kayak p95 436.15 / 452.00 ms (budget 525.45 / 528.08), graph build 325.0 s (limit 485.4), page +90,737 bytes Brotli (limit +500,000). Malingsbo-Kloten and Lomsdal-Visten stay off until their own runs.
 
 - 2026-09-27 — phase 12f: a kayak tap near the bank takes the line off the bank (d + 2.1 m reach, travel before open water in that band, land kept when as near), and a raw point enters no Landing water in its middle. On Abisko with the switch on 960 of 960 comparisons equal the extended reference and kayak p95 is 409.20 / 437.30 ms (budget 525.45 / 528.08; corrected in 12g, 12f's note had swapped its two timing columns); switch off, graph and answers are main's. Not yet switched on; 12g does that per map.
