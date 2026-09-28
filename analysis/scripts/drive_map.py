@@ -847,7 +847,12 @@ SCENES: dict[str, Scene] = {
         cap=17,
         # Phase 9 re-measures water and walking figures after finer water and noding.
         figures={
-            "kayak shore water, m": 831.576,
+            # Phase 12g: the line off the bank (kayak-offset-phases.md, phase 12g; the evidence's scene-diff.md).
+            # The exact taps stay raw beside the line 15 m out; the bay is cut by a straight water connector,
+            # cheaper than the way round; the carry's landings gain their spurs; the Kloten bay tap reaches
+            # the water over 7.52 m more ground; Korslångssmedja follows the offset line, Korslång the channel's middle.
+            "kayak shore water, m": 835.012,
+            "kayak shore water, finger taps, m": 864.588,
             # Phase 10: the short Kloten launch and the measured ground/path trade.
             "phone-2 1→2, Stay on paths off: on foot m": 175.289,
             "phone-2 1→2, Stay on paths off: water m": 0,
@@ -857,26 +862,27 @@ SCENES: dict[str, Scene] = {
             "phone-2 2→3, Stay on paths off: water m": 0,
             "phone-2 2→3, Stay on paths on: on foot m": 49.584,
             "phone-2 2→3, Stay on paths on: water m": 0,
-            "Kloten northern shore, Stay on paths off: on foot m": 224.873,
-            "Kloten northern shore, Stay on paths off: water m": 28.514,
-            "Kloten northern shore, Stay on paths on: on foot m": 224.873,
-            "Kloten northern shore, Stay on paths on: water m": 28.514,
+            "Kloten northern shore, Stay on paths off: on foot m": 232.392,
+            "Kloten northern shore, Stay on paths off: water m": 15.632,
+            "Kloten northern shore, Stay on paths on: on foot m": 232.392,
+            "Kloten northern shore, Stay on paths on: water m": 15.632,
             # Phase 11: a middle entry buys more road and less straight ground at the same prices.
-            "kayak ground/path competition, Stay on paths off: on foot m": 163.893,
-            "kayak ground/path competition, Stay on paths off: straight ground m": 51.201,
+            "kayak ground/path competition, Stay on paths off: on foot m": 171.412,
+            "kayak ground/path competition, Stay on paths off: straight ground m": 58.721,
             "kayak ground/path competition, Stay on paths off: road m": 106.286,
-            "kayak ground/path competition, Stay on paths on: on foot m": 321.419,
-            "kayak ground/path competition, Stay on paths on: straight ground m": 14.913,
+            "kayak ground/path competition, Stay on paths on: on foot m": 328.939,
+            "kayak ground/path competition, Stay on paths on: straight ground m": 22.433,
             "kayak ground/path competition, Stay on paths on: road m": 300.100,
-            "kayak lake-bank reference, m": 831.576,
-            "kayak bay water, m": 1073.404,
-            "kayak portage on foot, m": 46.348,
-            "kayak portage water, m": 619.511,
-            "Korslångssmedja water, m": 4419.018,
+            "kayak lake-bank reference, m": 864.588,
+            "kayak bay water, m": 924.775,
+            "kayak bay water, finger taps, m": 900.526,
+            "kayak portage on foot, m": 46.454,
+            "kayak portage water, m": 631.348,
+            "Korslångssmedja water, m": 4472.017,
             "Korslångssmedja on foot, m": 0,
-            "Korslång upstream water, m": 1184.863,
+            "Korslång upstream water, m": 1142.504,
             "Korslång upstream on foot, m": 115.352,
-            "Korslång downstream water, m": 1184.863,
+            "Korslång downstream water, m": 1142.504,
             "Korslång downstream on foot, m": 115.352,
             # Phase 11: the same Storsjön taps use local interior entries in both walking settings.
             "walking: shore-pair foot, m": 3225.664,
@@ -888,7 +894,9 @@ SCENES: dict[str, Scene] = {
             # Phase 9: the fixed journey has 9,074 points instead of 9,076; its GPX words stay unchanged.
             # Phase 10 launch noding resamples the same way: 9,074 points → 9,051 points; GPX words stay unchanged.
             # Phase 11: local road entries reduce straight ground, 0.22 → 0.03 km; the journey has 9,053 points.
-            "dry way figures bytes": "74341e3c191f53351bab3b64eeb07e23f8e69387fde2fa13db87dc6efabeab40",
+            # Phase 12g: the new water lines node the ways that cross them (walking 152,825 → 153,196 edges); the
+            # dry journey reads 22,971.1396 m against 22,971.1376 on main, and its figures page is resampled.
+            "dry way figures bytes": "b720d2fec671f28d0e60d6179b47f5a3d30eb1c8bbaaedfa6c2dffa9a3c21a71",
             "dry way GPX description bytes": "304f3b3b3d4ef8ca6462c68ebaaccffba6cf439abddc5ad061234ef9d6e148e3",
             # Twice the rebuilt page's measured 1,240 ms, allowing two drives.
             "map build ceiling in ms (Firefox on forge)": 2480,
