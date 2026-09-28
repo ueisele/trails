@@ -8010,6 +8010,24 @@ def lake_river_interfaces(stem: str) -> Any:
     return lakes.boundary.intersection(rivers.boundary)
 
 
+def off_the_bank(line: Any, water: Any) -> bool:
+    """Whether an open-water line lies on the line off the bank: every vertex and segment middle
+    within d + 2.1 m of the source bank, as a cap held by two shoulders does and a chord across
+    the lake does not (``kayak-offset-phases.md`` §4.4, the bank fixtures' reference)."""
+    import numpy as np
+    import shapely
+    from trails.network.paddle_geometry import CONTOUR_DEVIATION_M, PADDLE_OFFSET_M
+
+    banks = getattr(off_the_bank, "_banks", None)
+    if banks is None or banks[0] is not water:
+        outline = shapely.boundary(shapely.union_all(shapely.force_2d(water.geometry.to_numpy())))
+        banks = (water, shapely.STRtree(shapely.get_parts(shapely.line_merge(outline))))
+        off_the_bank._banks = banks  # type: ignore[attr-defined]
+    xy = shapely.get_coordinates(line)
+    points = shapely.points(np.vstack((xy, (xy[:-1] + xy[1:]) / 2)))
+    return bool(banks[1].query_nearest(points, return_distance=True, all_matches=False)[1].max() <= PADDLE_OFFSET_M + CONTOUR_DEVIATION_M)
+
+
 def lake_bank_reference(page: Any) -> dict[str, Any]:
     """Find the shortest bank way on this graph, allowing only river mouths."""
     import heapq
@@ -8024,17 +8042,20 @@ def lake_bank_reference(page: Any) -> dict[str, Any]:
         return dict(cached)
     if SCENE.kayak_shore is None:
         raise ValueError("a lake-bank reference needs the scene's fixed shore pair")
+    offset = water_roles(page)
     graph = page.evaluate(
-        """points => {
+        """([points, offset]) => {
         const g = trailsGraph, work = kayakMeasure.router(g), edges = [], nodes = new Set();
+        // With the line off the bank, Narrow water follows the bank where the offset cannot.
+        const bank = new Set(['Shore', ...(offset ? ['Narrow water'] : [])]);
         for (let e = 0; e < g.header.edges; e++) {
           const name = g.header.sources[g.sources[e]].name;
-          if (name !== 'Shore' && name !== 'Open water') continue;
+          if (!bank.has(name) && name !== 'Open water') continue;
           const a = g.fromNode[e], b = g.toNode[e], geometry = [];
-          if (name === 'Shore') { nodes.add(a); nodes.add(b); }
+          if (bank.has(name)) { nodes.add(a); nodes.add(b); }
           else for (let v = g.vertexAt[e]; v < g.vertexAt[e + 1]; v++)
             geometry.push([g.coordinates[2*v], g.coordinates[2*v+1]]);
-          edges.push({a, b, metres:work.length[e], shore:name === 'Shore', geometry});
+          edges.push({a, b, metres:work.length[e], shore:bank.has(name), geometry});
         }
         const ends = points.map(p => {
           let node = -1, distance = Infinity;
@@ -8047,7 +8068,7 @@ def lake_bank_reference(page: Any) -> dict[str, Any]:
         });
         return {edges, ends, nodes:g.header.nodes};
         }""",
-        SCENE.kayak_shore.points,
+        [SCENE.kayak_shore.points, offset],
     )
     water = shore_source_water(SCENE.stem)
     transform = Transformer.from_crs(4326, water.crs, always_xy=True)
@@ -8062,9 +8083,10 @@ def lake_bank_reference(page: Any) -> dict[str, Any]:
             x, y = transform.transform(xy[:, 0], xy[:, 1])
             line = shapely.LineString(np.column_stack((x, y)))
             hits = tree.query(line, predicate="intersects")
-            if not len(hits) or not shapely.union_all(tree.geometries[hits]).covers(line):
+            if len(hits) and shapely.union_all(tree.geometries[hits]).covers(line):
+                mouths += 1
+            elif not (offset and off_the_bank(line, water)):
                 continue
-            mouths += 1
         a, b, metres = edge["a"], edge["b"], edge["metres"]
         adjacent[a].append((b, metres, edge["shore"]))
         adjacent[b].append((a, metres, edge["shore"]))
@@ -8091,7 +8113,14 @@ def lake_bank_reference(page: Any) -> dict[str, Any]:
                     heapq.heappush(heap, (value, other))
         raise RuntimeError("the lake-bank reference exceeded its traversal bound")
 
-    result = {"metres": shortest(False), "shore_only": shortest(True), "mouth_edges": mouths, "ends": graph["ends"]}
+    try:
+        shore_only: float | None = shortest(True)
+    except ValueError:
+        # Caps and mouths join the line off the bank, so its bank lines alone need not connect.
+        if not offset:
+            raise
+        shore_only = None
+    result = {"metres": shortest(False), "shore_only": shore_only, "mouth_edges": mouths, "ends": graph["ends"]}
     page._trails_lake_bank = result
     return result
 
@@ -8107,24 +8136,34 @@ def lake_bank_readings(page: Any, got: dict[str, Any]) -> list[Reading]:
     interfaces = lake_river_interfaces(SCENE.stem)
     allowance = SHORE_SIMPLIFY_M + 0.1
     allowed = interfaces.buffer(allowance)
-    transform = Transformer.from_crs(4326, shore_source_water(SCENE.stem).crs, always_xy=True)
-    maximum, metres = 0.0, 0.0
+    water = shore_source_water(SCENE.stem)
+    transform = Transformer.from_crs(4326, water.crs, always_xy=True)
+    # With the line off the bank, an open-water piece may also be a cap on that line, and
+    # Narrow water follows the bank where the offset cannot (§4.4, the bank fixtures' reference).
+    offset = water_roles(page)
+    maximum, metres, caps = 0.0, 0.0, 0
     contained = True
     pieces = [opened for part in got["paddledTrack"] for opened in part["opened"]]
     for part in pieces:
         x, y = transform.transform(part["lon"], part["lat"])
         line = shapely.LineString(np.column_stack((x, y)))
-        contained = contained and allowed.covers(line)
-        positions = shapely.line_interpolate_point(line, np.r_[np.arange(0, line.length, 0.1), line.length])
-        maximum = max(maximum, float(shapely.distance(positions, interfaces).max()) if not interfaces.is_empty else math.inf)
+        if allowed.covers(line):
+            positions = shapely.line_interpolate_point(line, np.r_[np.arange(0, line.length, 0.1), line.length])
+            maximum = max(maximum, float(shapely.distance(positions, interfaces).max()) if not interfaces.is_empty else math.inf)
+        elif offset and off_the_bank(line, water):
+            caps += 1
+        else:
+            contained = False
         metres += part["length"]
     state = got["state"]
     sources = state["tally"]["sources"]
     network_metres = sum(part["length"] for part in got["paddledTrack"] if part["kind"] == "paddled" and part["sources"])
+    along = sources.get("Shore", 0) + (sources.get("Narrow water", 0) if offset else 0)
+    stays = "every open-water piece stays on a lake/river mouth" + (" or on the line off the bank" if offset else "")
     return [
-        Reading("every open-water piece stays on a lake/river mouth", contained, True, note=f"{maximum:.6f} m maximum, at most {allowance:g} m"),
+        Reading(stays, contained, True, note=f"{maximum:.6f} m maximum at a mouth, at most {allowance:g} m; {caps} on the line off the bank"),
         Reading("the measured mouth pieces account for all open-water credit", metres, sources.get("Open water", 0), within=0.001),
-        Reading("shore and mouths account for the network paddle metres", sources.get("Shore", 0) + metres, network_metres, within=0.001),
+        Reading("shore and mouths account for the network paddle metres", along + metres, network_metres, within=0.001),
         Reading("the way stays within a tenth of the measured lake bank", state["crossed"], reference["metres"], within=reference["metres"] / 10),
         stands("kayak lake-bank reference, m", round(reference["metres"], 3), within=0.001),
         noted("the new Shore-only reference, m", reference["shore_only"]),
