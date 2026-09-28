@@ -8010,10 +8010,14 @@ def lake_river_interfaces(stem: str) -> Any:
     return lakes.boundary.intersection(rivers.boundary)
 
 
-def off_the_bank(line: Any, water: Any) -> bool:
-    """Whether an open-water line lies on the line off the bank: every vertex and segment middle
-    within d + 2.1 m of the source bank, as a cap held by two shoulders does and a chord across
-    the lake does not (``kayak-offset-phases.md`` §4.4, the bank fixtures' reference)."""
+def off_the_bank(lines: Any, water: Any) -> Any:
+    """Which open-water lines lie on the line off the bank: every vertex and segment middle within
+    d + 2.1 m of the source bank, as a cap held by two shoulders does and a chord across the lake
+    does not (``kayak-offset-phases.md`` §4.4, the bank fixtures' reference).
+
+    The bank is kept as pieces of 32 segments: a nearest query against a whole lake's or the sea's
+    ring measures every segment of it, which made this reading ten times slower on the sea.
+    """
     import numpy as np
     import shapely
     from trails.network.paddle_geometry import CONTOUR_DEVIATION_M, PADDLE_OFFSET_M
@@ -8021,11 +8025,23 @@ def off_the_bank(line: Any, water: Any) -> bool:
     banks = getattr(off_the_bank, "_banks", None)
     if banks is None or banks[0] is not water:
         outline = shapely.boundary(shapely.union_all(shapely.force_2d(water.geometry.to_numpy())))
-        banks = (water, shapely.STRtree(shapely.get_parts(shapely.line_merge(outline))))
+        pieces = []
+        for ring in shapely.get_parts(shapely.line_merge(outline)):
+            xy = shapely.get_coordinates(ring)
+            pieces += [shapely.LineString(xy[i : i + 33]) for i in range(0, len(xy) - 1, 32)]
+        banks = (water, shapely.STRtree(np.asarray(pieces, dtype=object)))
         off_the_bank._banks = banks  # type: ignore[attr-defined]
-    xy = shapely.get_coordinates(line)
-    points = shapely.points(np.vstack((xy, (xy[:-1] + xy[1:]) / 2)))
-    return bool(banks[1].query_nearest(points, return_distance=True, all_matches=False)[1].max() <= PADDLE_OFFSET_M + CONTOUR_DEVIATION_M)
+    lines = np.atleast_1d(np.asarray(lines, dtype=object))
+    if not len(lines):
+        return np.zeros(0, dtype=bool)
+    xy, owner = shapely.get_coordinates(lines, return_index=True)
+    same = owner[1:] == owner[:-1]
+    points = np.vstack((xy, ((xy[:-1] + xy[1:]) / 2)[same]))
+    which = np.concatenate((owner, owner[:-1][same]))
+    far = banks[1].query_nearest(shapely.points(points), return_distance=True, all_matches=False)[1]
+    farthest = np.full(len(lines), -np.inf)
+    np.maximum.at(farthest, which, far)
+    return farthest <= PADDLE_OFFSET_M + CONTOUR_DEVIATION_M
 
 
 def lake_bank_reference(page: Any) -> dict[str, Any]:
@@ -8077,16 +8093,27 @@ def lake_bank_reference(page: Any) -> dict[str, Any]:
     tree = shapely.STRtree(shapely.get_parts(allowed))
     adjacent: list[list[tuple[int, float, bool]]] = [[] for _ in range(graph["nodes"])]
     mouths = 0
-    for edge in graph["edges"]:
-        if not edge["shore"]:
-            xy = np.asarray(edge["geometry"])
-            x, y = transform.transform(xy[:, 0], xy[:, 1])
-            line = shapely.LineString(np.column_stack((x, y)))
-            hits = tree.query(line, predicate="intersects")
-            if len(hits) and shapely.union_all(tree.geometries[hits]).covers(line):
-                mouths += 1
-            elif not (offset and off_the_bank(line, water)):
-                continue
+    # Every open-water edge at once: which are mouths, and (with the line off the bank) which lie on it.
+    others = [i for i, edge in enumerate(graph["edges"]) if not edge["shore"]]
+    lines = []
+    for i in others:
+        xy = np.asarray(graph["edges"][i]["geometry"])
+        x, y = transform.transform(xy[:, 0], xy[:, 1])
+        lines.append(shapely.LineString(np.column_stack((x, y))))
+    keep = np.zeros(len(others), dtype=bool)
+    if lines:
+        near, hit = tree.query(np.asarray(lines, dtype=object), predicate="intersects")
+        for k in np.unique(near):
+            if shapely.union_all(tree.geometries[hit[near == k]]).covers(lines[k]):
+                keep[k] = True
+        mouths = int(keep.sum())
+        if offset and not keep.all():
+            rest = np.flatnonzero(~keep)
+            keep[rest] = off_the_bank(np.asarray(lines, dtype=object)[rest], water)
+    usable = set(np.asarray(others)[keep].tolist())
+    for i, edge in enumerate(graph["edges"]):
+        if not edge["shore"] and i not in usable:
+            continue
         a, b, metres = edge["a"], edge["b"], edge["metres"]
         adjacent[a].append((b, metres, edge["shore"]))
         adjacent[b].append((a, metres, edge["shore"]))
@@ -8150,7 +8177,7 @@ def lake_bank_readings(page: Any, got: dict[str, Any]) -> list[Reading]:
         if allowed.covers(line):
             positions = shapely.line_interpolate_point(line, np.r_[np.arange(0, line.length, 0.1), line.length])
             maximum = max(maximum, float(shapely.distance(positions, interfaces).max()) if not interfaces.is_empty else math.inf)
-        elif offset and off_the_bank(line, water):
+        elif offset and off_the_bank(line, water)[0]:
             caps += 1
         else:
             contained = False
@@ -8189,6 +8216,18 @@ def exact_tap_land(got: dict[str, Any], what: str) -> list[Reading]:
         Reading(f"{what} needs no land beyond a grid cell per connector end", walked <= route["allowance"], True),
         noted(f"{what}: land / allowance / connectors, m", [walked, route["allowance"], route["connectors"]]),
     ]
+
+
+def cut_over_water(got: dict[str, Any]) -> bool:
+    """Whether a leg cuts across open water: by an Open water chord, or by a straight connector over
+    water longer than any a tap needs to reach its line (d + 2.1 m). The connector is priced as a
+    chord is, 1.5, so between two points on opposite lines it can rightly beat a chord and the shore."""
+    from trails.network.paddle_geometry import CONTOUR_DEVIATION_M, PADDLE_OFFSET_M
+
+    if got["state"]["tally"]["sources"].get("Open water", 0) > 0:
+        return True
+    connectors = [part["length"] for part in got["paddledTrack"] if part["kind"] == "paddled" and not part["sources"]]
+    return max(connectors, default=0.0) > PADDLE_OFFSET_M + CONTOUR_DEVIATION_M
 
 
 def finger_tap_readings(
@@ -8242,8 +8281,8 @@ def a_bay_is_cut_and_a_lake_is_not(page: Any) -> Check:
     if SCENE.kayak_bay is None or SCENE.kayak_shore is None:
         return Check(name, skipped="this scene has no kayak bay and lake measured after the phase 5 rebuild")
     offset = water_roles(page)
-    bay = read_water_leg(page, SCENE.kayak_bay.points, measure_routing=offset)
-    lake = read_water_leg(page, SCENE.kayak_shore.points, measure_shore=True)
+    bay = read_water_leg(page, SCENE.kayak_bay.points, measure_routing=offset, measure_shore=True)
+    lake = read_water_leg(page, SCENE.kayak_shore.points, measure_shore=True, measure_routing=offset)
     b, s = bay["state"], lake["state"]
     if offset:
         # The exact bank taps stay raw beside the line off the bank; finger taps take it.
@@ -8252,7 +8291,7 @@ def a_bay_is_cut_and_a_lake_is_not(page: Any) -> Check:
         f = finger["state"]
         beside += [
             Reading("the bay, finger taps: shorter over water than round the shore", 0 < f["crossed"] < SCENE.kayak_bay.shore_m, True),
-            Reading("the bay, finger taps: an open-water chord", f["tally"]["sources"].get("Open water", 0) > 0, True),
+            Reading("the bay, finger taps: cut over open water", cut_over_water(finger), True),
         ]
     else:
         land, beside = [Reading("cutting the bay needs no land", b["walked"], 0)], []
@@ -8264,11 +8303,13 @@ def a_bay_is_cut_and_a_lake_is_not(page: Any) -> Check:
         + [
             Reading("the bay's direct line is mostly water", bay["direct"]["water"] > bay["direct"]["metres"] / 2, True),
             Reading("the bay is shorter over water than round the shore", 0 < b["crossed"] < SCENE.kayak_bay.shore_m, True),
-            Reading("the bay takes an open-water chord", b["tally"]["sources"].get("Open water", 0) > 0, True),
+            Reading("the bay is cut over open water", cut_over_water(bay), True)
+            if offset
+            else Reading("the bay takes an open-water chord", b["tally"]["sources"].get("Open water", 0) > 0, True),
             *land,
             Reading("the lake's direct line is mostly water", lake["direct"]["water"] > lake["direct"]["metres"] / 2, True),
             Reading("the lake goes farther than that direct crossing", s["crossed"] > lake["direct"]["metres"], True),
-            Reading("following the lake needs no land", s["walked"], 0),
+            *(exact_tap_land(lake, "following the lake") if offset else [Reading("following the lake needs no land", s["walked"], 0)]),
             noted("the measured shore round the bay, m", SCENE.kayak_bay.shore_m),
             noted("the direct lake crossing, m", lake["direct"]),
             stands("kayak bay water, m", round(b["crossed"], 3), within=0.001),
