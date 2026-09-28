@@ -764,19 +764,32 @@ def _without_dead_ends(rows: list[dict[str, Any]], others: list[BaseGeometry]) -
 
     Such an end would be a node of degree one after noding: nothing on land, no stream,
     no other water. A stream mouth's join (``contact`` -1) starts on its stream and stays.
-    Another spur from the same point counts as a line reaching it, so both stay.
+    Another spur reaching the end counts as a line reaching it, so both stay -- but only a
+    spur that stays itself: two anchors a few centimetres apart can each find only the
+    other's spur beside its end, and once that one is dropped for leading nowhere, the
+    first leads nowhere too (16 such spurs in Malingsbo-Kloten were left loose). So the
+    test repeats on what is left until nothing more drops.
     """
-    spurs = [index for index, row in enumerate(rows) if row["contact"] >= 0]
-    if not spurs:
-        return rows, 0
-    tips = shapely.points([shapely.get_coordinates(rows[index]["geometry"])[0] for index in spurs])
-    lines = np.asarray([*others, *(row["geometry"] for row in rows)], dtype=object)
-    near, found = shapely.STRtree(lines).query(tips, predicate="dwithin", distance=NODE_TOLERANCE_M)
-    own = np.asarray(spurs)[near] + len(others)
-    reached = np.zeros(len(spurs), dtype=bool)
-    reached[near[found != own]] = True
-    dead = {index for index, hit in zip(spurs, reached.tolist(), strict=True) if not hit}
-    return [row for index, row in enumerate(rows) if index not in dead], len(dead)
+    kept = list(rows)
+    dropped = 0
+    for _ in range(len(rows) + 1):
+        spurs = [index for index, row in enumerate(kept) if row["contact"] >= 0]
+        if not spurs:
+            break
+        tips = shapely.points([shapely.get_coordinates(kept[index]["geometry"])[0] for index in spurs])
+        lines = np.asarray([*others, *(row["geometry"] for row in kept)], dtype=object)
+        near, found = shapely.STRtree(lines).query(tips, predicate="dwithin", distance=NODE_TOLERANCE_M)
+        own = np.asarray(spurs)[near] + len(others)
+        reached = np.zeros(len(spurs), dtype=bool)
+        reached[near[found != own]] = True
+        dead = {index for index, hit in zip(spurs, reached.tolist(), strict=True) if not hit}
+        if not dead:
+            break
+        kept = [row for index, row in enumerate(kept) if index not in dead]
+        dropped += len(dead)
+    else:
+        raise ValueError("the dead-end spurs did not settle")
+    return kept, dropped
 
 
 def _bridges(
@@ -888,6 +901,63 @@ def stream_edges(probed: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     streams = probed[probed["source"] == STREAMS].copy()
     streams["chain_id"] = streams["probe_chain"]
     return streams
+
+
+def joined_where_they_meet(network: Network, within_m: float) -> tuple[Network, dict[str, int]]:
+    """Make one node of two that lie on one point, which a bridge of no length should have joined.
+
+    A loose end lying on another line's middle is bridged by cutting that line where the end
+    lies and drawing a connector to it; the connector has no length there, and
+    ``graph._connectors`` draws none, so the cut and the end stay two nodes on one point and
+    the end stays loose (a portage path ending on a Topografi 50 path in Malingsbo-Kloten,
+    also loose in main's graph). Noding otherwise keeps nodes at least its tolerance apart,
+    so only these pairs lie within ``within_m`` of each other. A carry, launch or landing
+    end left loose so is made one node with what it lies on; walking ways that meet so are
+    left as main has them (154 in Malingsbo-Kloten's main graph), as a walking change is not
+    this line's to make. Node ids are renumbered densely and degrees and components read again.
+    Only the switch-on build calls this: main's graph keeps its separate nodes.
+
+    Returns:
+        The network, and how many nodes were merged away
+    """
+    nodes, edges = network.nodes, network.edges
+    ends = edges[["from_node", "to_node"]].to_numpy(dtype=int)
+    degree = np.bincount(ends.ravel(), minlength=len(nodes))
+    access = edges["kind"].isin((PORTAGE, LAUNCH)).to_numpy() | (edges["source"] == LANDING_WATER).to_numpy()
+    loose = np.unique(ends[access].ravel())
+    loose = loose[degree[loose] == 1]
+    if not len(loose):
+        return network, {"nodes merged": 0}
+    points = np.asarray(nodes.geometry.to_numpy(), dtype=object)
+    near, found = shapely.STRtree(points).query(points[loose], predicate="dwithin", distance=within_m)
+    pairs = [(int(loose[a]), int(b)) for a, b in zip(near.tolist(), found.tolist(), strict=True) if int(loose[a]) != int(b)]
+    if not pairs:
+        return network, {"nodes merged": 0}
+    parent = np.arange(len(nodes))
+
+    def root(node: int) -> int:
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = int(parent[node])
+        return node
+
+    for a, b in pairs:
+        ra, rb = root(a), root(b)
+        if ra != rb:
+            parent[max(ra, rb)] = min(ra, rb)
+    merged_to = np.array([root(node) for node in range(len(nodes))])
+    used = np.unique(merged_to[ends.ravel()])
+    dense = np.full(len(nodes), -1, dtype=np.int64)
+    dense[used] = np.arange(len(used))
+    renumbered = dense[merged_to[ends]]
+    if (renumbered < 0).any():
+        raise ValueError("a merged node lost its number")
+    edges = edges.copy()
+    edges["from_node"] = renumbered[:, 0]
+    edges["to_node"] = renumbered[:, 1]
+    edges["component"] = label_components(edges)
+    kept = nodes.iloc[used].drop(columns=["degree", "component"]).reset_index(drop=True)
+    return replace(network, edges=edges, nodes=_describe_nodes(kept, edges)), {"nodes merged": int(len(nodes) - len(used))}
 
 
 #: How far round the rounded grid point a node cut at a disc looks for one outside it: 4 grid steps

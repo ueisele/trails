@@ -641,6 +641,9 @@ def build(
         # was bridged there at no length, and noding drops a line of no length.
         network = node(sources, bridge_m=ZERO_BRIDGE_M)
         print(f"  Combined graph build with the line off the bank: {time.perf_counter() - started:.3f} s; {len(network.edges):,} edges")
+        # A bridge of no length is drawn as none: the end and the cut it reached are made one node here.
+        network, assembled.evidence["joined where they meet"] = paddle_network.joined_where_they_meet(network, ZERO_BRIDGE_M)
+        print(f"  Line off the bank, nodes on one point made one: {assembled.evidence['joined where they meet']}")
         # The page's grid would round a cut end into its dam's disc; the switch-off graph keeps phase 9's ends.
         network, assembled.evidence["written off the discs"] = paddle_network.written_off_the_discs(network, assembled.dams)
         print(f"  Line off the bank, ends written off the dam discs: {assembled.evidence['written off the discs']}")

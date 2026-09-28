@@ -193,6 +193,20 @@ def test_a_spur_whose_bank_end_nothing_else_reaches_is_left_out():
     assert [row["geometry"].coords[0] for row in kept] == [(0, 0), (200, 0), (200, 0), (300, 0)]
 
 
+def test_a_spur_reached_only_by_a_spur_that_is_left_out_is_left_out_too():
+    # Two anchors a metre apart, neither with a land side. The first spur's bank end lies 5 mm beside
+    # the second spur's middle; the second's bank end finds nothing. Once the second goes, so does the first.
+    first, second = LineString([(0, 0), (0, 15)]), LineString([(0.005, -1), (0.005, 1), (15, 5)])
+    assert second.distance(Point(0, 0)) < 0.01 and first.distance(Point(0.005, -1)) > 0.01
+    rows = [
+        {"geometry": first, "contact": 1},
+        {"geometry": second, "contact": 2},
+        {"geometry": LineString([(100, 0), (100, 15)]), "contact": 3},  # a way ends here: stays
+    ]
+    kept, dropped = paddle_network._without_dead_ends(rows, [LineString([(100, -50), (100, 0)])])
+    assert dropped == 2 and [row["contact"] for row in kept] == [3]
+
+
 def test_stream_directions_are_the_bank_build_s_even_where_the_new_lines_cut_them_finer(built):
     off, on = built["off"].edges, built["on"].edges
     old = off[off["source"] == water.STREAMS].groupby("chain_id")
@@ -505,3 +519,49 @@ def test_a_loose_end_on_another_line_s_middle_is_bridged_again_when_the_network_
         track = edges[edges["source"] == "track"]
         end = [n for n in track[["from_node", "to_node"]].to_numpy(dtype=int).ravel() if again.nodes.geometry.iloc[n].distance(Point(50, 0.3)) < 1e-6]
         assert len(end) == 1 and bool(degree[end[0]] > 1) is joined, reach
+
+
+def test_an_end_lying_on_a_line_s_middle_is_one_node_with_the_cut_it_reached():
+    # A carry ending exactly on a path's middle: the bridge that reaches it has no length and is not drawn,
+    # so the cut and the end would stay two nodes on one point, the carry loose (main keeps that).
+    path = NetworkSource(PATH, gpd.GeoDataFrame(geometry=[LineString([(650_000, 7_580_000), (650_100, 7_580_000.3)])], crs=CRS))
+    x, y = 650_050, 7_580_000.15
+    carry = NetworkSource("Portage paths", gpd.GeoDataFrame(geometry=[LineString([(x, y + 30), (x, y)])], crs=CRS), kind="portage")
+    network = build_network([path, carry], metric_crs=CRS, bridge_m=water.ZERO_BRIDGE_M)
+    carried = network.edges[network.edges["source"] == "Portage paths"]
+    assert (network.nodes["degree"] == 1).sum() == 4
+    joined, figures = paddle_network.joined_where_they_meet(network, water.ZERO_BRIDGE_M)
+    assert figures == {"nodes merged": 1}
+    assert sorted(joined.nodes["degree"].tolist()) == [1, 1, 1, 3]
+    end = joined.edges[joined.edges["source"] == "Portage paths"]
+    walked = joined.edges[joined.edges["source"] == PATH]
+    assert set(end[["from_node", "to_node"]].to_numpy().ravel()) & set(walked[["from_node", "to_node"]].to_numpy().ravel())
+    assert joined.edges["component"].nunique() == 1 and len(carried) == 1
+    # Nodes apart by more than the reach are left as they are, the same object.
+    again, figures = paddle_network.joined_where_they_meet(joined, water.ZERO_BRIDGE_M)
+    assert again is joined and figures == {"nodes merged": 0}
+
+
+def test_ways_that_meet_on_one_point_are_left_as_main_has_them():
+    # Two walking ends on one point, with no carry, launch or landing among them: not this line's to join.
+    nodes = gpd.GeoDataFrame(
+        {"degree": [1, 1, 1, 1], "component": [0, 0, 1, 1]}, geometry=[Point(0, 0), Point(10, 0), Point(10, 0), Point(20, 0)], crs=CRS
+    )
+    edges = gpd.GeoDataFrame(
+        {
+            "from_node": [0, 2],
+            "to_node": [1, 3],
+            "cost": [10.0, 10.0],
+            "source": [PATH, PATH],
+            "kind": [PATH, PATH],
+            "chain_id": ["a", "b"],
+            "length_m": [10.0, 10.0],
+            "one_way": [False, False],
+            "component": [0, 1],
+        },
+        geometry=[LineString([(0, 0), (10, 0)]), LineString([(10, 0), (20, 0)])],
+        crs=CRS,
+    )
+    network = Network(chains=gpd.GeoDataFrame(geometry=[], crs=CRS), edges=edges, nodes=nodes)
+    same, figures = paddle_network.joined_where_they_meet(network, water.ZERO_BRIDGE_M)
+    assert same is network and figures == {"nodes merged": 0}
