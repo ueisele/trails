@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import pytest
 import shapely
 from shapely.geometry import LineString, Point, box
@@ -441,7 +442,7 @@ def test_a_centre_branch_serving_an_anchor_ends_on_the_anchor_after_the_page_s_g
     assert (degree[carry[["from_node", "to_node"]].to_numpy(dtype=int)] == 1).sum() == 1
 
 
-def test_the_build_stops_on_a_carry_end_that_meets_nothing_unless_the_earlier_build_or_the_crop_left_it():
+def test_the_build_stops_on_a_carry_end_that_meets_nothing_unless_the_crop_left_it():
     network, degree = _carry_meets_the_branch(_anchored_branch((100.02, 0.03)))
     assembled = paddle_network.Assembled(
         sources=[],
@@ -451,13 +452,56 @@ def test_the_build_stops_on_a_carry_end_that_meets_nothing_unless_the_earlier_bu
         contacts=gpd.GeoDataFrame(geometry=[], crs=CRS),
         dams=np.empty(0),
         water=None,  # type: ignore[arg-type]
-        loose_before=np.array([[100.0, -300.0]]),
     )
+    # Both ends count, the far one too: an end the earlier build left loose is no exception.
     found = paddle_network._loose_access(network, assembled, degree)
-    assert found["new"] == {"Portages": 1} and found["loose before"] == {"Portages": 1}
-    assert found["at"] == [[100.0, 0.0]]
-    # The same end on the map's edge is the crop's.
-    cropped = replace(assembled, extent=box(-500, 0, 500, 500))
-    assert paddle_network._loose_access(network, cropped, degree)["new"] == {}
+    assert found["loose"] == {"Portages": 2}
+    assert sorted(found["at"]) == [[100.0, -300.0], [100.0, 0.0]]
+    # An end on the map's edge is the crop's.
+    cropped = replace(assembled, extent=box(-500, -300, 500, 500))
+    assert paddle_network._loose_access(network, cropped, degree)["loose"] == {"Portages": 1}
     network, degree = _carry_meets_the_branch(paddle_network._on_their_anchors(_anchored_branch((100.02, 0.03)))[0])
-    assert paddle_network._loose_access(network, assembled, degree)["new"] == {}
+    assert paddle_network._loose_access(network, cropped, degree)["loose"] == {}
+
+
+def test_a_carry_end_main_left_beside_the_bank_is_a_contact():
+    """A carry drawn to a Shore vertex on a node of its own: no route reached the water from it, and the line off the bank must."""
+    shore = NetworkSource(
+        water.SHORE, gpd.GeoDataFrame(geometry=[LineString([(0, 0), (100, 0)])], crs=CRS), kind=PADDLE, keep_whole=True, settled=True
+    )
+    carries = [LineString([(50, -200), (50, 0)]), LineString([(300, -200), (300, -10)])]
+    carry = NetworkSource(water.PORTAGES, gpd.GeoDataFrame(geometry=carries, crs=CRS), kind=PORTAGE, keep_whole=True, settled=True)
+    old = build_network([shore, carry], metric_crs=CRS, bridge_m=0.0)
+    # Settled lines join what they end on; this one is taken apart to stand where main's did.
+    edges = old.edges.copy()
+    joined = edges["source"] == water.PORTAGES
+    stray = len(old.nodes)
+    ends = edges.loc[joined, "to_node"].to_numpy(dtype=int)
+    at_bank = [i for i, node in zip(edges.index[joined], ends, strict=True) if old.nodes.geometry.iloc[node].distance(Point(50, 0)) < 1e-9]
+    edges.loc[at_bank, "to_node"] = stray
+    nodes = pd.concat([old.nodes, old.nodes.iloc[[0]].set_geometry([Point(50, 0)])], ignore_index=True)
+    loose = replace(old, edges=edges, nodes=gpd.GeoDataFrame(nodes, geometry="geometry", crs=CRS))
+    found = paddle_network.contacts(loose, dams=np.empty(0), extent=None)
+    row = found[found["node"] == stray]
+    assert len(row) == 1 and row["roles"].iloc[0] == "portage" and bool(row["surface"].iloc[0]) and int(row["anchor"].iloc[0]) >= 0
+    # The carry whose loose end lies on no water is a land end, and no contact.
+    assert not (found.geometry.distance(Point(300, -10)) < 1).any()
+
+
+def test_a_loose_end_on_another_line_s_middle_is_bridged_again_when_the_network_is_noded_again():
+    """The first noding bridges it at no length; noding again drops a line of no length, so the end is bridged anew."""
+    # Noded through its simplified copy, the road misses the vertex the path ends on.
+    road = NetworkSource(PATH, gpd.GeoDataFrame(geometry=[LineString([(0, 0), (50, 0.3), (100, 0)])], crs=CRS), node_simplify_m=1.0)
+    # A nanometre above it, as the sources' coordinates leave such ends: an end exactly on the vertex gets no bridge at all.
+    path = NetworkSource("track", gpd.GeoDataFrame(geometry=[LineString([(50, 100), (50, 0.3 + 1e-9)])], crs=CRS))
+    first = build_network([road, path], metric_crs=CRS, bridge_m=25.0)
+    bridges = first.edges[first.edges["kind"] == BRIDGE]
+    assert len(bridges) == 1 and bridges["length_m"].iloc[0] < water.ZERO_BRIDGE_M
+    carried = NetworkSource(BRIDGE, gpd.GeoDataFrame(geometry=list(bridges.geometry), crs=CRS), kind=BRIDGE, keep_whole=True, settled=True)
+    for reach, joined in ((0.0, False), (water.ZERO_BRIDGE_M, True)):
+        again = build_network([road, path, carried], metric_crs=CRS, bridge_m=reach)
+        edges = again.edges
+        degree = np.bincount(edges[["from_node", "to_node"]].to_numpy(dtype=int).ravel(), minlength=len(again.nodes))
+        track = edges[edges["source"] == "track"]
+        end = [n for n in track[["from_node", "to_node"]].to_numpy(dtype=int).ravel() if again.nodes.geometry.iloc[n].distance(Point(50, 0.3)) < 1e-6]
+        assert len(end) == 1 and bool(degree[end[0]] > 1) is joined, reach

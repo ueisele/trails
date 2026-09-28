@@ -45,6 +45,11 @@ PORTAGE_M = 1000.0
 PATH_JOIN_M = 150.0
 DAM_CUT_M = 25.0
 DAM_NEAR_M = 25.0
+#: How far a loose end may reach when the line off the bank nodes the network again: only
+#: onto a line it already lies on. The first noding bridged such an end at no length
+#: (242 in Lomsdal-Visten, 49 in Malingsbo-Kloten, 30 in Abisko, all under 1 µm), and a
+#: bridge of no length cannot be carried over as a line.
+ZERO_BRIDGE_M = 1e-6
 #: Phase 7's chain measurement opens 173 level chains / 282 edges / 46.9 km
 #: in Malingsbo-Kloten and 35 / 44 / 2.2 km in Abisko. Whole chains keep
 #: noding from opening locally flat pieces of a falling stream.
@@ -631,8 +636,10 @@ def build(
             print(f"  Line off the bank, {step.removesuffix('_s')}: {seconds:.3f} s")
         sources[:] = assembled.sources
         started = time.perf_counter()
-        # Every bridge is the build's above, carried over as a line; none is inferred again.
-        network = node(sources, bridge_m=0.0)
+        # Every bridge is the build's above, carried over as a line; none is inferred again,
+        # save the ones a line cannot carry: a loose end lying on another line's middle
+        # was bridged there at no length, and noding drops a line of no length.
+        network = node(sources, bridge_m=ZERO_BRIDGE_M)
         print(f"  Combined graph build with the line off the bank: {time.perf_counter() - started:.3f} s; {len(network.edges):,} edges")
         # The page's grid would round a cut end into its dam's disc; the switch-off graph keeps phase 9's ends.
         network, assembled.evidence["written off the discs"] = paddle_network.written_off_the_discs(network, assembled.dams)
