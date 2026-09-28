@@ -423,12 +423,23 @@ SCENES: dict[str, Scene] = {
         over_http=True,
         # Phase 9 re-measures water and walking figures after finer water and noding.
         figures={
-            "kayak shore water, m": 938.729,
-            "kayak lake-bank reference, m": 938.729,
-            "kayak bay water, m": 699.661,
+            # Phase 12g, the line off the bank: the exact bank taps reach the line about 15 m out by
+            # raw connectors, of which 16.130 m (shore) and 7.916 m (bay) lie on the water grid's dry
+            # cells and are walked, within a grid cell per end; 938.729 and 699.661 before. The
+            # lake-bank reference follows the line and its mouths and caps between the nodes nearest
+            # the taps (938.729 on the bank).
+            "kayak shore water, m": 924.967,
+            "kayak lake-bank reference, m": 939.569,
+            "kayak bay water, m": 571.763,
+            # Phase 12g: the same taps put down by a finger at z17 take the line; across the bay the
+            # way between them is one straight water connector.
+            "kayak shore water, finger taps, m": 931.398,
+            "kayak bay water, finger taps, m": 551.094,
             # Phase 10: walking land price and launches, with Stay on paths off.
             "kayak portage on foot, m": 144.679,
-            "kayak portage water, m": 1550.194,
+            # Phase 12g: 1550.194 before; the same carry, its water ends reaching the line off the bank
+            # by Landing water spurs (29.1 m) and the way following that line.
+            "kayak portage water, m": 1597.866,
             # Phase 11: local interior entries shorten both fixed walking ways.
             "walking: shore-pair foot, m": 964.077,
             "walking: shore-pair water, m": 0,
@@ -438,7 +449,8 @@ SCENES: dict[str, Scene] = {
             "stay on paths: shore-pair straight land, m": 469.627,
             # Phase 9 adds one noding post: 7,639 → 7,640 points; GPX words are unchanged.
             # Phase 10 launch noding resamples the same way: 7,640 points → 7,641 points; GPX words stay unchanged.
-            "dry way figures bytes": "fed593fbf1505692cd6cfdf78faaa894c5227b6412116ea9766b2d5c81260c56",
+            # Phase 12g: the line off the bank nodes the ways again, 7,641 → 7,644 points; GPX words unchanged.
+            "dry way figures bytes": "4f282c6b792f5bd9cfd6991d042c91cc2c9d16034eb5f9096b82d08fa68c0193",
             "dry way GPX description bytes": "48f83b5bc2c2edc445641aa4ce17c445121330e4df7bda3c96190002ecdef5a7",
             # A regression ceiling for two parallel drives, not an idle-box baseline.
             "map build ceiling in ms (Firefox on forge)": 4000,
