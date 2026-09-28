@@ -627,11 +627,20 @@ SCENES: dict[str, Scene] = {
         # 19 legend rows, one base map.
         # Phase 9 re-measures water and walking figures after finer water and noding.
         figures={
-            "kayak shore water, m": 2167.118,
-            "kayak lake-bank reference, m": 2167.118,
-            "kayak bay water, m": 1416.986,
-            "kayak portage on foot, m": 1.45,
-            "kayak portage water, m": 417.749,
+            # Phase 12g: the line off the bank (offset-plan/phase-12g-abisko/scene-diff.md). The
+            # reference follows the line 15 m off Torneträsk's bank; the exact bank taps stay raw and
+            # reach it by connectors over water, the bay's across a dry grid cell (12.6 m, within a
+            # cell per connector end); the scene's carry paddles, since Narrow water joins its lakes.
+            "kayak shore water, m": 2143.439,
+            "kayak lake-bank reference, m": 2141.839,
+            "kayak bay water, m": 1379.93,
+            "kayak portage on foot, m": 11.072,
+            "kayak portage water, m": 455.314,
+            # Phase 12g: the same legs from finger taps beside the exact ones, and the new carry.
+            "kayak shore water, finger taps, m": 2143.972,
+            "kayak bay water, finger taps, m": 1370.946,
+            "kayak carry, finger taps, on foot, m": 128.514,
+            "kayak carry, finger taps, water, m": 332.758,
             # Phase 11: local interior entries replace node-only connectors for these fixed taps.
             "walking: shore-pair foot, m": 2259.064,
             "walking: shore-pair water, m": 15.244,
@@ -640,8 +649,10 @@ SCENES: dict[str, Scene] = {
             "stay on paths: shore-pair water, m": 20.331,
             "stay on paths: shore-pair straight land, m": 339.992,
             # Phase 10 launch noding resamples the same way: 6,418 points → 6,412 points; GPX words stay unchanged.
-            "dry way figures bytes": "83566506ec4d0f6c665f977a1b8f5676488b655fa1261ecdd0954506707a973a",
-            "dry way GPX description bytes": "3c6ed6696078211fdff2f9556c135bf05b3fec2e092950d4e2d5295ce724ee57",
+            # Phase 12g: the line off the bank nodes the ways it crosses (walking edges 44,994 → 45,138),
+            # which resamples the way again: 16,700.517 → 16,700.507 m.
+            "dry way figures bytes": "7b7610215bcd0d0d6e2178684b529da8db2d88bfd848d3ca7396930b608f485c",
+            "dry way GPX description bytes": "7c11691bf157561e02b18e4c61b1e2aab74f07360344cc22cf2808bc74f17392",
             # A regression ceiling for two parallel drives, not an idle-box baseline.
             "map build ceiling in ms (Firefox on forge)": 1500,
             # Clipped to the box since the review (§9.15): one point chain and
