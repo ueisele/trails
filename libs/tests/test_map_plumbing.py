@@ -180,8 +180,7 @@ def test_new_page_settings_and_companions_name_its_own_provider(builder):
     assert "Malingsbo-Kloten Atlas" in html
 
 
-@pytest.mark.parametrize("target", ["drive-all", "drive-both"])
-def test_drive_all_filters_scenes_runs_together_and_sums_statuses(tmp_path, target):
+def _drive_all(tmp_path, target, script, *extra):
     # Isolate the logs too: a unit test must not replace a real browser report.
     (tmp_path / "Makefile").write_text((ROOT / "Makefile").read_text().replace("/tmp/drive-", f"{tmp_path}/drive-"))
     pages = tmp_path / "analysis/output"
@@ -195,18 +194,11 @@ def test_drive_all_filters_scenes_runs_together_and_sums_statuses(tmp_path, targ
         "if '-c' in sys.argv:\n"
         "    print('first second unbuilt')\n"
         "    raise SystemExit(0)\n"
-        "stem = pathlib.Path(sys.argv[sys.argv.index('--page') + 1]).stem\n"
-        "pathlib.Path(stem + '.started').touch()\n"
-        "for attempt in range(100):\n"
-        "    if all(pathlib.Path(s + '.started').exists() for s in ('first', 'second')):\n"
-        "        print(stem + ' driven together')\n"
-        "        raise SystemExit({'first': 1, 'second': 2}[stem])\n"
-        "    time.sleep(0.01)\n"
-        "raise SystemExit(10)\n"
+        "stem = pathlib.Path(sys.argv[sys.argv.index('--page') + 1]).stem\n" + script
     )
     executable.chmod(0o755)
-    result = subprocess.run(
-        ["bash", "-c", f"command make {target} MISE="],
+    return subprocess.run(
+        ["bash", "-c", f"command make {target} MISE= {' '.join(extra)}"],
         cwd=tmp_path,
         env={**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}"},
         capture_output=True,
@@ -214,11 +206,49 @@ def test_drive_all_filters_scenes_runs_together_and_sums_statuses(tmp_path, targ
         timeout=15,
         check=False,
     )
-    assert "first driven together" in result.stdout and "second driven together" in result.stdout
+
+
+@pytest.mark.parametrize("target", ["drive-all", "drive-both"])
+def test_drive_all_filters_scenes_runs_one_page_at_a_time_and_sums_statuses(tmp_path, target):
+    # Each page's run finds no other page's run under way: the default drives them one after another.
+    result = _drive_all(
+        tmp_path,
+        target,
+        "if any(pathlib.Path(s + '.running').exists() for s in ('first', 'second')):\n"
+        "    print(stem + ' overlapped')\n"
+        "    raise SystemExit(10)\n"
+        "pathlib.Path(stem + '.running').touch()\n"
+        "time.sleep(0.2)\n"
+        "pathlib.Path(stem + '.running').unlink()\n"
+        "pathlib.Path(stem + '.started').touch()\n"
+        "print(stem + ' driven alone')\n"
+        "raise SystemExit({'first': 1, 'second': 2}[stem])\n",
+    )
+    assert "first driven alone" in result.stdout and "second driven alone" in result.stdout
+    assert "overlapped" not in result.stdout
     assert "Error 3" in result.stderr
     assert result.returncode != 0
     assert not (tmp_path / "no-scene.started").exists()
     assert not (tmp_path / "unbuilt.started").exists()
+
+
+def test_drive_all_in_parallel_runs_the_pages_together_and_sums_statuses(tmp_path):
+    result = _drive_all(
+        tmp_path,
+        "drive-all",
+        "pathlib.Path(stem + '.started').touch()\n"
+        "for attempt in range(100):\n"
+        "    if all(pathlib.Path(s + '.started').exists() for s in ('first', 'second')):\n"
+        "        print(stem + ' driven together')\n"
+        "        raise SystemExit({'first': 1, 'second': 2}[stem])\n"
+        "    time.sleep(0.01)\n"
+        "raise SystemExit(10)\n",
+        "DRIVE_PARALLEL=1",
+    )
+    assert "first driven together" in result.stdout and "second driven together" in result.stdout
+    assert "Error 3" in result.stderr
+    assert result.returncode != 0
+    assert not (tmp_path / "no-scene.started").exists()
 
 
 def test_naturkartan_links_accept_names_and_numbers(builder):

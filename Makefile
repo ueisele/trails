@@ -55,7 +55,8 @@ help:
 	@echo "  make lomsdal-visten  The whole Lomsdal-Visten chain: dem, shade, slope, graph, map (no login)"
 	@echo "  make drive         Drive one built page in a browser: ARGS=\"--page analysis/output/abisko.html\""
 	@echo "                     ARGS=\"--only <word>,<word>\" runs just those checks, which is seconds not minutes"
-	@echo "  make drive-all     Drive every built page with a scene at once; ARGS goes to each"
+	@echo "  make drive-all     Drive every built page with a scene, one after another; ARGS goes to each,"
+	@echo "                     DRIVE_PARALLEL=1 drives them all at once (needs the memory of one Firefox a page)"
 	@echo "  make drive-both    Alias of drive-all"
 	@echo "  make deploy        Publish the built map and purge the edge (needs .env)"
 	@echo "                     ARGS=\"--tree tiles\" mirrors a tile tree instead; --tree dem the heights"
@@ -315,28 +316,37 @@ drive:
 	@echo "🖱️  Driving the built map in a browser (about eight minutes a page)..."
 	uv run --with "playwright==1.62.0" python -u analysis/scripts/drive_map.py $(ARGS)
 
-# **Every page at once, which they may be since no reading is a wall clock.** A run
-# owns its browser and serves the page on a port the kernel picks, so several of them
-# share nothing but the machine -- eight cores against one Firefox apiece. What used
-# to forbid this was the suite itself: four readings compared elapsed seconds against
-# figures recorded on an idle box, so two runs at once reported the contention as a
-# change in the page. Those are printed and no longer compared, and what is claimed
-# about a timeout is counted instead. Only a page with a scene is driven; a new page
-# joins when its scene lands. Each log is kept whole, so one run answers every reading
-# without driving the page again; `-u` because the output is buffered the moment it is
-# not a terminal, and a log that arrives only at the end reads like a run that has hung.
+# **One page after another, unless asked otherwise.** A run owns its browser and serves the page
+# on a port the kernel picks, so several of them share nothing but the machine, and no reading
+# is a wall clock: four readings once compared elapsed seconds against figures recorded on an
+# idle box, and those are printed now, not compared. So the pages *may* be driven together --
+# `DRIVE_PARALLEL=1` does that -- but they no longer fit together: with the line off the bank,
+# three Firefoxes on the three pages were killed by the OOM killer under the box's 10 GB cap on
+# 2026-09-28, and the same readings passed one page at a time. So the default is one at a time.
+# Only a page with a scene is driven; a new page joins when its scene lands. Each log is kept
+# whole, so one run answers every reading without driving the page again; `-u` because the
+# output is buffered the moment it is not a terminal, and a log that arrives only at the end
+# reads like a run that has hung -- which is why each page says where its log is as it starts.
+# The exit status is the sum of the pages', so one broken page fails the target.
 drive-all:
-	@echo "🖱️  Driving every built page with a scene at once..."
+	@echo "🖱️  Driving every built page with a scene$(if $(DRIVE_PARALLEL), at once, one after another)..."
 	@scenes=$$(uv run python -c 'import sys; sys.path.insert(0, "analysis/scripts"); from drive_map import SCENES; print(" ".join(SCENES))') || exit $$?; \
 	 pids=""; logs=""; status=0; \
 	 for page in analysis/output/*.html; do \
 		[ -f "$$page" ] || continue; \
 		stem=$${page##*/}; stem=$${stem%.html}; \
 		case " $$scenes " in *" $$stem "*) ;; *) continue ;; esac; \
-		log="/tmp/drive-$$stem.txt"; \
-		uv run --with "playwright==1.62.0" python -u analysis/scripts/drive_map.py \
-			--page "$$page" $(ARGS) > "$$log" 2>&1 & \
-		pids="$$pids $$!"; logs="$$logs $$log"; \
+		log="/tmp/drive-$$stem.txt"; logs="$$logs $$log"; \
+		echo "  $$page -> $$log"; \
+		if [ -n "$(DRIVE_PARALLEL)" ]; then \
+			uv run --with "playwright==1.62.0" python -u analysis/scripts/drive_map.py \
+				--page "$$page" $(ARGS) > "$$log" 2>&1 & \
+			pids="$$pids $$!"; \
+		else \
+			uv run --with "playwright==1.62.0" python -u analysis/scripts/drive_map.py \
+				--page "$$page" $(ARGS) > "$$log" 2>&1; \
+			said=$$?; status=$$((status + said)); \
+		fi; \
 	 done; \
 	 for pid in $$pids; do wait $$pid; said=$$?; status=$$((status + said)); done; \
 	 if [ -n "$$logs" ]; then cat $$logs; fi; \

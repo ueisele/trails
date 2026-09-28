@@ -336,10 +336,11 @@ Abisko, loaded twice over for the offline check — and about two minutes of it
 fetching real tiles from Kartverket on the first page, which is what it costs to
 prove that a kept tile is terrain and not the worker's own blank. Run it as a
 transient unit (`systemd-run --user --unit=abisko-drive …`); its output is
-buffered until the unit ends, and the pages are worth driving side by side in
-separate units rather than one after the other. `command make drive-all` does that for every
-built page whose scene is recorded and keeps a log per page. Malingsbo-Kloten's first build
-is 23.3 MB (2026-09-20); its drive readings are recorded in phase 5.
+buffered until the unit ends. `command make drive-all` drives every built page whose scene
+is recorded, **one after another**, and keeps a log per page: with the line off the bank
+three Firefoxes at once no longer fit the box's 10 GB (OOM-killed on 2026-09-28).
+`DRIVE_PARALLEL=1` still drives them side by side where the memory is there. Malingsbo-Kloten's
+first build is 23.3 MB (2026-09-20); its drive readings are recorded in phase 5.
 
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs. And **build before driving**: the run reads
