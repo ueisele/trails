@@ -637,6 +637,9 @@ def build(
         # The page's grid would round a cut end into its dam's disc; the switch-off graph keeps phase 9's ends.
         network, assembled.evidence["written off the discs"] = paddle_network.written_off_the_discs(network, assembled.dams)
         print(f"  Line off the bank, ends written off the dam discs: {assembled.evidence['written off the discs']}")
+        # A disc can cut a narrow where its middle meets the contour; the pieces on one side of the dam are joined again.
+        network, assembled.evidence["joined along the discs"] = paddle_network.joined_along_the_discs(network, assembled.dams, assembled.water)
+        print(f"  Line off the bank, joined along the dam discs: {assembled.evidence['joined along the discs']}")
         assembled.evidence["validation"] = paddle_network.validate(network, assembled)
         print(f"  Line off the bank after noding: {assembled.evidence['validation']}")
     report(network)

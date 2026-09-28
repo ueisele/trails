@@ -36,6 +36,7 @@ halo of ``OFFSET_HALO_M`` round the map and replaces the bank-following sources:
 Review's decisions of 2026-09-27 (not Uwe's) fixed the last four and the halo.
 """
 
+import math
 import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field, replace
@@ -66,7 +67,7 @@ from trails.network.water import (
     _outside_dams,
     eligible_bodies,
 )
-from trails.routing.graph import DEFAULT_BRIDGE_COST_FACTOR, Network
+from trails.routing.graph import DEFAULT_BRIDGE_COST_FACTOR, Network, _describe_nodes, label_components
 from trails.routing.noding import NODE_TOLERANCE_M
 from trails.routing.sources import BRIDGE, FERRY, LANDING, LAUNCH, OPEN, PADDLE, PATH, PORTAGE, STREAM, TRAVEL, NetworkSource
 
@@ -993,6 +994,184 @@ def written_off_the_discs(network: Network, dams: np.ndarray) -> tuple[Network, 
         moved_index = sorted(moved_nodes)
         nodes.loc[moved_index, "geometry"] = gpd.GeoSeries([Point(nodes_xy[node]) for node in moved_index], index=moved_index, crs=nodes.crs)
     return replace(network, edges=edges, nodes=nodes), figures
+
+
+#: A cut end lies on its dam's circle; after the grid repair it sits at most this far outside it.
+ARC_END_M = 0.5
+#: How far round a dam the water is read to find where the circle lies in it.
+ARC_WINDOW_M = 200.0
+#: Radii the join along an arc is tried at, nearest the circle first: a pinch may hold only the innermost.
+ARC_RADII_M = (25.02, 25.05, 25.1, 25.2, 25.4, 25.8, 26.5, 28.0, 30.0)
+#: The join's vertices along the circle, at most this far apart.
+ARC_STEP_M = 0.5
+
+
+def joined_along_the_discs(network: Network, dams: np.ndarray, water: Bodies) -> tuple[Network, dict[str, Any]]:
+    """Join the pieces of the line a dam disc cut apart on one side of the dam, along the disc.
+
+    The analytic cut (``water._outside_dams``) can take out the place where a narrow's middle meets the
+    contour, or a branch's way on, when that place lies within 25 m of a dam: both lines then end on the
+    circle, unjoined, though the water between them outside the disc is one. Main's bank line went round
+    such a disc outside it. Review's decision of 2026-09-28 (not Uwe's): where the 25 m circle lies in the
+    unsimplified water, each contiguous stretch of it (an **arc**) is one side of the dam; consecutive cut
+    ends along one arc that belong to different paddled components are joined by Narrow water running
+    along the arc just outside the disc, contained in the water and clear of every disc before and after
+    the page's grid, however narrow the water there. Ends on different arcs are never joined, so no join
+    passes the dam; a circle that lies wholly in water, a dam standing in open water, stops the build.
+    Only the switch-on build calls this.
+
+    Args:
+        network: The graph as noded, its cut ends already written off the discs, metric
+        dams: Dam points, metric; none leaves the network as it is, the same object
+        water: The unsimplified eligible bodies the line was drawn from
+
+    Returns:
+        The network and the joins made: where, between which sources, their length and the least
+        width of water they pass through (twice their least distance to the bank)
+    """
+    figures: dict[str, Any] = {"joins": 0, "joins m": 0.0, "least water width m": None, "places": []}
+    if not len(dams) or not len(water.polygons):
+        return network, figures
+    edges, nodes = network.edges, network.nodes
+    to_page, from_page = pg._page_round_trip(edges.crs)
+    dam_xy = shapely.get_coordinates(dams)
+    body_tree = shapely.STRtree(water.polygons)
+    paddled = edges[edges["kind"] == PADDLE]
+    parent: dict[int, int] = {}
+
+    def root(node: int) -> int:
+        path = []
+        while parent.setdefault(node, node) != node:
+            path.append(node)
+            node = parent[node]
+        for each in path:
+            parent[each] = node
+        return node
+
+    for a, b in zip(paddled["from_node"].tolist(), paddled["to_node"].tolist(), strict=True):
+        ra, rb = root(a), root(b)
+        if ra != rb:
+            parent[ra] = rb
+    end_nodes = np.unique(paddled[["from_node", "to_node"]].to_numpy(dtype=int))
+    end_xy = shapely.get_coordinates(np.asarray(nodes.geometry.loc[end_nodes], dtype=object))
+    end_tree = shapely.STRtree(np.asarray(shapely.points(end_xy), dtype=object))
+    touching: dict[int, list[int]] = defaultdict(list)
+    for position, (a, b) in enumerate(paddled[["from_node", "to_node"]].to_numpy(dtype=int).tolist()):
+        touching[a].append(position)
+        touching[b].append(position)
+
+    def clear(coords: np.ndarray) -> float:
+        return float(min(pg._distance_to_segment(dam_xy, one, other).min() for one, other in zip(coords[:-1], coords[1:], strict=True)))
+
+    def dry(line: LineString, local: BaseGeometry) -> float:
+        return float(shapely.difference(line, local).length)
+
+    added: list[dict[str, Any]] = []
+    for d, (x, y) in enumerate(dam_xy.tolist()):
+        centre = Point(x, y)
+        window = centre.buffer(ARC_WINDOW_M)
+        near = body_tree.query(window, predicate="intersects")
+        if not len(near):
+            continue
+        clipped = shapely.get_parts(shapely.intersection(np.asarray(water.polygons)[near], window))
+        local = shapely.union_all(clipped[shapely.get_type_id(clipped) == 3])
+        circle = centre.buffer(DAM_CUT_M, quad_segs=256).exterior
+        arcs = [a for a in shapely.get_parts(shapely.line_merge(shapely.intersection(circle, local))) if a.length > 0]
+        if any(a.is_closed for a in arcs):
+            raise ValueError(f"the dam at {[x, y]} stands in open water: its whole 25 m circle is water, and no arc is one side of it")
+        candidates = end_tree.query(centre, predicate="dwithin", distance=DAM_CUT_M + ARC_END_M)
+        cut = [int(end_nodes[k]) for k in candidates if np.hypot(*(end_xy[k] - [x, y])) >= DAM_CUT_M - pg.DRY_NOISE_M]
+        for arc in arcs:
+            on_arc = [n for n in cut if arc.distance(Point(end_xy[np.searchsorted(end_nodes, n)])) <= ARC_END_M]
+            on_arc.sort(key=lambda n: arc.project(Point(end_xy[np.searchsorted(end_nodes, n)])))
+            for a, b in zip(on_arc[:-1], on_arc[1:], strict=True):
+                if root(a) == root(b):
+                    continue
+                pa, pb = end_xy[np.searchsorted(end_nodes, a)], end_xy[np.searchsorted(end_nodes, b)]
+                ta, tb = math.atan2(pa[1] - y, pa[0] - x), math.atan2(pb[1] - y, pb[0] - x)
+                turn = (tb - ta + math.pi) % (2 * math.pi) - math.pi
+                steps = max(1, math.ceil(abs(turn) * DAM_CUT_M / ARC_STEP_M))
+                angles = ta + np.linspace(0.0, turn, steps + 1)[1:-1]
+                line = None
+                for radius in ARC_RADII_M:
+                    middle = np.column_stack([x + radius * np.cos(angles), y + radius * np.sin(angles)])
+                    coords = np.vstack([pa, middle, pb])
+                    written = pg.decoded(coords, to_page, from_page)
+                    trial, read = LineString(coords), LineString(written)
+                    if (
+                        clear(coords) >= DAM_CUT_M
+                        and clear(written) >= DAM_CUT_M
+                        and dry(trial, local) <= pg.DRY_NOISE_M
+                        and dry(read, local) <= pg.DRY_NOISE_M
+                    ):
+                        line = trial
+                        break
+                if line is None:
+                    raise ValueError(f"no contained join along the disc of the dam at {[x, y]} between {pa.tolist()} and {pb.tolist()}")
+                parent[root(a)] = root(b)
+                sources = sorted({paddled["source"].iloc[p] for n in (a, b) for p in touching[n]})
+                # The join takes its lake owner from a surface line at either end, a stream's only where there is none.
+                at_ends = touching[a] + touching[b]
+                owner = next(
+                    (paddled["chain_id"].iloc[p] for p in at_ends if paddled["source"].iloc[p] != STREAMS), paddled["chain_id"].iloc[at_ends[0]]
+                )
+                width = 2 * float(shapely.distance(local.boundary, line))
+                added.append({"from_node": a, "to_node": b, "geometry": line, "owner": owner, "dam": d, "sources": sources, "width": width})
+    if not added:
+        return network, figures
+    chains = network.chains
+    by_id = chains.set_index("chain_id")
+    new_edges, new_chains = [], []
+    for k, join in enumerate(added):
+        line = join["geometry"]
+        start = shapely.get_coordinates(line)[0]
+        chain_id = f"narrow-water-dam-{int(start[0])}-{int(start[1])}-{k}"
+        new_edges.append(
+            {
+                "from_node": join["from_node"],
+                "to_node": join["to_node"],
+                "cost": line.length,
+                "source": NARROW_WATER,
+                "kind": PADDLE,
+                "chain_id": chain_id,
+                "length_m": line.length,
+                "one_way": False,
+                "geometry": line,
+            }
+        )
+        owner = by_id.loc[join["owner"]]
+        new_chains.append(
+            {
+                **{column: owner[column] for column in chains.columns if column not in ("chain_id", "geometry")},
+                "chain_id": chain_id,
+                "source": NARROW_WATER,
+                "kind": PADDLE,
+                "identity": None,
+                "length_m": line.length,
+                "geometry": line,
+            }
+        )
+        lon, lat = to_page.transform(*shapely.get_coordinates(line.interpolate(0.5, normalized=True))[0])
+        figures["places"].append(
+            {
+                "dam": join["dam"],
+                "at": [round(lat, 6), round(lon, 6)],
+                "between": join["sources"],
+                "m": round(line.length, 3),
+                "width m": round(join["width"], 3),
+            }
+        )
+    grown = pd.concat([edges.drop(columns="component"), gpd.GeoDataFrame(new_edges, geometry="geometry", crs=edges.crs)], ignore_index=True)
+    grown = gpd.GeoDataFrame(grown, geometry="geometry", crs=edges.crs)
+    grown["component"] = label_components(grown)
+    chains = gpd.GeoDataFrame(
+        pd.concat([chains, gpd.GeoDataFrame(new_chains, geometry="geometry", crs=chains.crs)], ignore_index=True), geometry="geometry", crs=chains.crs
+    )
+    nodes = _describe_nodes(nodes.drop(columns=["degree", "component"]), grown)
+    figures["joins"] = len(added)
+    figures["joins m"] = round(sum(j["geometry"].length for j in added), 3)
+    figures["least water width m"] = round(min(j["width"] for j in added), 3)
+    return replace(network, edges=grown, nodes=nodes, chains=chains), figures
 
 
 def _coordinate_quantum() -> float:

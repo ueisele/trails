@@ -1494,6 +1494,15 @@ object, so Abisko's and Lomsdal-Visten's switch-on graphs do not change. Known s
 this line does not change: main's Malingsbo-Kloten graph keeps phase 9's 284 paddled edges whose
 rounded end lies up to 5.6 cm inside a disc (Shore 143, Open water 125, Streams 16, every one at a line end).
 
+**Review's decision, 2026-09-28 (not Uwe's), on the passages a dam disc cut:** where a disc takes out the
+place a narrow's middle meets the contour, both lines end on the circle unjoined though the water outside
+the disc is one (Malingsbo-Kloten, 11 dams). Each contiguous stretch of the 25 m circle inside the
+unsimplified water, an arc, is one side of its dam; consecutive cut ends on one arc in different paddled
+components are joined by Narrow water along the arc, contained in that water and clear of every disc before
+and after the grid, however narrow the water (as 12c keeps a middle through a pinch). Ends on different arcs
+are never joined, so no join passes a dam; a circle wholly in water stops the build
+(`paddle_network.joined_along_the_discs`). It restores connections main had and changes no dam rule.
+
 ### Phase 12h — Review the three maps as one feature
 
 *Reviewing session.* *Files:* final approval/build notes in

@@ -363,3 +363,38 @@ def test_without_dams_the_graph_is_the_same_object():
     )
     same, figures = paddle_network.written_off_the_discs(network, np.empty(0, dtype=object))
     assert same is network and figures["nodes moved"] == 0
+
+
+def test_pieces_a_dam_disc_cut_apart_on_one_side_are_joined_along_it_and_never_across_the_dam():
+    # A 40 m river across a dam in Sweden: the 25 m circle meets it in a western arc and an eastern one.
+    # Two lines end on the western arc, apart; one on the eastern arc, past the dam.
+    dam = Point(650_000, 7_580_000)
+    x, y = dam.x, dam.y
+    river = gpd.GeoDataFrame({"cls": [LAKE]}, geometry=[box(x - 300, y - 20, x + 300, y + 20)], crs=CRS)
+    bodies = water.eligible_bodies(river, "cls", (LAKE,), None)
+
+    def on_circle(degrees: float) -> tuple[float, float]:
+        return (x + 25.05 * np.cos(np.radians(degrees)), y + 25.05 * np.sin(np.radians(degrees)))
+
+    lines = [LineString([(x - 200, y), on_circle(180)]), LineString([(x - 100, y + 15), on_circle(150)]), LineString([on_circle(0), (x + 200, y)])]
+    network = build_network([NetworkSource("Narrow water", gpd.GeoDataFrame(geometry=lines, crs=CRS), kind=PADDLE)], metric_crs=CRS)
+    network, _ = paddle_network.written_off_the_discs(network, np.array([dam]))
+    joined, figures = paddle_network.joined_along_the_discs(network, np.array([dam]), bodies)
+    assert figures["joins"] == 1 and figures["places"][0]["between"] == ["Narrow water"]
+    edges = joined.edges
+    new = edges.iloc[len(network.edges) :]
+    assert len(new) == 1 and (new["source"] == "Narrow water").all() and (new["kind"] == PADDLE).all()
+    # Along the western arc, outside the disc on the page's grid, in the water, and not to the east.
+    to_page, from_page = paddle_geometry._page_round_trip(CRS)
+    written = paddle_geometry.decoded(shapely.get_coordinates(new.geometry.iloc[0]), to_page, from_page)
+    assert paddle_geometry._dam_clearance(written, np.array([[x, y]])) >= water.DAM_CUT_M
+    assert shapely.difference(LineString(written), bodies.polygons[0]).length == 0
+    assert (written[:, 0] < x).all()
+    west = edges[shapely.get_coordinates(edges.geometry.interpolate(0.5, normalized=True))[:, 0] < x]
+    east = edges[shapely.get_coordinates(edges.geometry.interpolate(0.5, normalized=True))[:, 0] > x]
+    assert west["component"].nunique() == 1 and not set(west["component"]) & set(east["component"])
+    assert joined.nodes["degree"].sum() == 2 * len(edges)
+    assert set(joined.chains["chain_id"]) >= set(new["chain_id"])
+    # Joined once, the network is left as it is.
+    again, figures = paddle_network.joined_along_the_discs(joined, np.array([dam]), bodies)
+    assert figures["joins"] == 0 and again is joined
