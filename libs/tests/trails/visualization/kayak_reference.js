@@ -109,6 +109,15 @@ function referenceJoined(graph, from, to) {
         return kind === PADDLE || kind === CROSSING ? 0 : length;
     };
     const dryConnector = (a, b, price) => kayak() ? price.land / offPath() : panel().metresBetween(a.lon, a.lat, b.lon, b.lat);
+    // Phase 13: on foot a ground connector ends only at a node one of whose
+    // edges the walk can travel, found here from the edges themselves.
+    const walkable = new Uint8Array(n);
+    for (let e = 0; e < graph.header.edges && !kayak(); e++) {
+        if (Number.isFinite(work.cost[e]) && (allowed(graph, e, true) || allowed(graph, e, false))) {
+            walkable[graph.fromNode[e]] = 1; walkable[graph.toNode[e]] = 1;
+        }
+    }
+    const turns = node => kayak() || walkable[node] === 1;
     const heap = new Heap(), targets = endsOf(graph, to, true);
     let exitPrices = 0, entryPrices = 0;
     const starts = endsOf(graph, from);
@@ -126,6 +135,7 @@ function referenceJoined(graph, from, to) {
         }
     } else {
         for (let node = 0; node < n; node++) {
+            if (!turns(node)) continue;
             exitPrices++;
             const at = {lon: graph.nodeLon[node], lat: graph.nodeLat[node]}, price = referenceNodePrice(graph, to, node, true);
             seed(node, price, dryConnector(at, to, price));
@@ -177,6 +187,7 @@ function referenceJoined(graph, from, to) {
         }
     } else {
         for (let node = 0; node < n; node++) {
+            if (!turns(node)) continue;
             entryPrices++;
             const at = {lon: graph.nodeLon[node], lat: graph.nodeLat[node]}, price = referenceNodePrice(graph, from, node, false);
             enter(node, price, dryConnector(from, at, price));

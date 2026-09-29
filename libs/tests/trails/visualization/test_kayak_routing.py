@@ -576,6 +576,103 @@ def readings():
             }
         }
         stayOnPaths(false);
+        // Phase 13: on foot a walk turns only where there is a way. The straight
+        // line from F to T crosses a lake 40 m wide; a node W on the far side of
+        // it lies only on a Shore line, and two straight lines over dry ground
+        // by way of W beat the one across the water. A road runs north of both.
+        function walkGraph(withRoad) {
+            const sources=[{name:'Shore',kind:'paddle',factor:1,role:'travel'},{name:'road',kind:'path',factor:1},
+                {name:'Open water',kind:'paddle',factor:1.5,role:'open'}];
+            const where=[xy(100,70),xy(100,120),xy(40,150),xy(160,150)];
+            const built=alternatives(sources,withRoad?[[0,1,0],[2,3,1]]:[[0,1,0]],withRoad?where:where.slice(0,2));
+            built.roleOf=sources.map(s=>s.role||null);
+            const spec={west:-0.01,south:-0.01,dLon:0.00005,dLat:0.00005,cols:1000,rows:1000};
+            const stride=(spec.cols+7)>>3,bits=new Uint8Array(stride*spec.rows);
+            for(let y=0;y<spec.rows;y++)for(let x=0;x<spec.cols;x++) {
+                const lon=(spec.west+(x+0.5)*spec.dLon)/M,lat=(spec.south+(y+0.5)*spec.dLat)/M;
+                if(lon>=80&&lon<=120&&lat<=50)bits[y*stride+(x>>3)]|=0x80>>(x&7);
+            }
+            built.water={spec,stride,bits,cellM:5};
+            built.waterAt=(lon,lat)=>{const x=Math.floor((lon-spec.west)/spec.dLon),y=Math.floor((lat-spec.south)/spec.dLat);
+                return x>=0&&y>=0&&x<spec.cols&&y<spec.rows&&!!(bits[y*stride+(x>>3)]&(0x80>>(x&7)));};
+            return built;
+        }
+        const shape=(chosen)=>!chosen?'straight':chosen.middleOnly?'along a way':
+            (chosen.over?'via '+chosen.over.edges.map(e=>g.header.sources[g.sources[e]].name).join(','):'pivot at '+chosen.head);
+        const F={node:-1,lon:0,lat:0},T={node:-1,lon:200*M,lat:0},T2={node:-1,lon:30*M,lat:5*M};
+        out.walkingTurns=[];
+        for(const road of [false,true])for(const staying of [false,true]) {
+            g=walkGraph(road); paddle(false); stayOnPaths(staying); routing=null;
+            const row={road,staying,walkNodes:Array.from(router(g).walkNodes)};
+            let chosen=joinedRoute(g,F,T);
+            row.shape=shape(chosen); row.actual=chosenLabel(g,F,T,chosen); row.expected=referenceJoined(g,F,T);
+            row.direct=connectorPrice(g,F.lon,F.lat,T.lon,T.lat);
+            row.shortShape=shape(joinedRoute(g,F,T2));
+            // Main's rule, every node a place to turn: the same search then pivots at W.
+            router(g).walkNodes.fill(1);
+            chosen=joinedRoute(g,F,T);
+            row.everyNode={shape:shape(chosen),label:chosenLabel(g,F,T,chosen)};
+            routing=null;
+            // The kayak's land legs end at water, and the walking table is not read there.
+            paddle(true); routing=null;
+            const kayakChosen=joinedRoute(g,F,T),kayakLabel=chosenLabel(g,F,T,kayakChosen);
+            router(g).walkNodes.fill(0);
+            const kayakAgain=joinedRoute(g,F,T);
+            row.kayak={shape:shape(kayakChosen),label:kayakLabel,again:chosenLabel(g,F,T,kayakAgain),
+                againShape:shape(kayakAgain),expected:referenceJoined(g,F,T)};
+            out.walkingTurns.push(row);
+        }
+        paddle(true); stayOnPaths(false);
+        // The seeded differential on foot, on graphs where some nodes lie only on
+        // water, carries or launches: production against the reference's own rule.
+        seed=20260928;
+        out.walkingDifferential=[];
+        for(let terrain=0;terrain<4;terrain++) {
+            const nodes=Array.from({length:14},()=>[random()*0.01,random()*0.01]);
+            const sources=[{name:'Open water',kind:'paddle',factor:1.5,role:'open'},
+                {name:'Shore',kind:'paddle',factor:1,role:'travel'},{name:'path',kind:'path',factor:1},
+                {name:'carry',kind:'portage',factor:3},{name:'launch',kind:'launch',factor:1},
+                {name:'ferry',kind:'ferry',flatM:5000},{name:'bridge',kind:'bridge',factor:1.3}];
+            const arcs=Array.from({length:18},()=>[Math.floor(random()*12),Math.floor(random()*12),Math.floor(random()*sources.length)]);
+            arcs[2][2]=2; arcs[3][2]=1; arcs[4][2]=1;
+            g=alternatives(sources,arcs,nodes);
+            g.roleOf=sources.map(s=>s.role||null);
+            g.water.cellM=10;
+            const spec={west:-0.01,south:-0.01,dLon:0.0001,dLat:0.0001,cols:300,rows:300};
+            g.water.spec=spec;
+            const stride=(spec.cols+7)>>3,bits=new Uint8Array(stride*spec.rows);
+            for(let y=0;y<spec.rows;y++)for(let x=0;x<spec.cols;x++) {
+                const wet=terrain===0||terrain===2&&(x<130||x>160||y>170)||terrain===3&&((x%23)<8||(y%31)<9);
+                if(wet)bits[y*stride+(x>>3)]|=0x80>>(x&7);
+            }
+            g.water.stride=stride;g.water.bits=bits;
+            g.waterAt=(lon,lat)=>{
+                const x=Math.floor((lon-spec.west)/spec.dLon),y=Math.floor((lat-spec.south)/spec.dLat);
+                return x>=0&&y>=0&&x<spec.cols&&y<spec.rows&&!!(bits[y*stride+(x>>3)]&(0x80>>(x&7)));
+            };
+            for(let pair=0;pair<8;pair++) {
+                let from={node:-1,lon:random()*0.014-0.002,lat:random()*0.014-0.002};
+                let to={node:-1,lon:random()*0.014-0.002,lat:random()*0.014-0.002};
+                if(pair%4===1)from={node:g.fromNode[2]};
+                if(pair%4===2) {
+                    const edge=2,ratio=0.2+random()*0.6,a=g.fromNode[edge],b=g.toNode[edge];
+                    to={node:-1,edge,along:0,lon:nodes[a][0]+ratio*(nodes[b][0]-nodes[a][0]),lat:nodes[a][1]+ratio*(nodes[b][1]-nodes[a][1])};
+                }
+                for(const p of [from,to])if(p.node>=0){p.lon=g.nodeLon[p.node];p.lat=g.nodeLat[p.node];}
+                if(pair>=4)[from,to]=[to,from];
+                for(const staying of [false,true]) {
+                    paddle(false); stayOnPaths(staying); routing=null;
+                    if(to.edge>=0)to.along=router(g).length[to.edge]*0.5;
+                    const chosen=joinedRoute(g,from,to),actual=chosenLabel(g,from,to,chosen);
+                    const expected=referenceJoined(g,from,to);
+                    const turnedAt=chosen&&!chosen.middleOnly?[chosen.head,chosen.tail]:[];
+                    out.walkingDifferential.push({terrain,pair,staying,actual,expected,
+                        turnsOnWay:turnedAt.every(n=>router(g).walkNodes[n]===1),
+                        waterOnly:Array.from(router(g).walkNodes).filter(v=>v===0).length});
+                }
+            }
+        }
+        paddle(true); stayOnPaths(false);
         panel=pagePanel;
         paddle(true); stayOnPaths(false);
         console.log(JSON.stringify(out));
@@ -1030,3 +1127,48 @@ def test_seeded_joined_search_with_roles_matches_the_unpruned_reference(readings
         for label in ("land", "cost"):
             expected = row["expected"][label]
             assert abs(row["actual"][label] - expected) <= 1e-8 + 1e-12 * abs(expected), row
+
+
+def _same(actual, expected):
+    for key in ("land", "cost"):
+        assert actual[key] == pytest.approx(expected[key], rel=1e-12, abs=1e-8)
+
+
+def test_a_walk_does_not_turn_at_a_node_that_lies_only_on_water(readings):
+    for row in readings["walkingTurns"]:
+        # Main's rule turned at W, the Shore line's node beyond the lake, in both settings.
+        assert row["everyNode"]["shape"] == "pivot at 0"
+        assert row["walkNodes"][:2] == [0, 0]
+        assert row["shape"] != "pivot at 0" and "Shore" not in row["shape"]
+        _same(row["actual"], row["expected"])
+        if not row["road"]:
+            # With nothing else to turn at, the straight line across the water is the answer.
+            assert row["shape"] == "straight"
+            _same(row["actual"], row["direct"])
+
+
+def test_a_walk_takes_a_way_nearby_instead_of_the_water_node(readings):
+    rows = {(r["road"], r["staying"]): r for r in readings["walkingTurns"]}
+    assert rows[True, False]["shape"] in ("via road", "along a way")
+    assert rows[True, False]["actual"]["cost"] < rows[True, False]["direct"]["cost"]
+    assert rows[True, False]["actual"]["cost"] > rows[True, False]["everyNode"]["label"]["cost"]
+
+
+def test_the_straight_line_stays_where_it_is_cheapest(readings):
+    for row in readings["walkingTurns"]:
+        assert row["shortShape"] == "straight"
+
+
+def test_the_kayak_does_not_read_the_walking_rule(readings):
+    for row in readings["walkingTurns"]:
+        kayak = row["kayak"]
+        assert kayak["label"] == kayak["again"] and kayak["shape"] == kayak["againShape"]
+        _same(kayak["label"], kayak["expected"])
+
+
+def test_seeded_walking_search_matches_the_reference_and_turns_only_on_ways(readings):
+    rows = readings["walkingDifferential"]
+    assert len(rows) == 64 and all(r["waterOnly"] > 0 for r in rows)
+    for row in rows:
+        _same(row["actual"], row["expected"])
+        assert row["turnsOnWay"]

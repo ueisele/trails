@@ -205,6 +205,19 @@
                     else { cost[i] = source.flatM * (whole[i] > 0 ? length[i] / whole[i] : 1); }
                 }
 
+                // **Where a walk may leave the ground (phase 13, Uwe's "A").** A
+                // walk away from the ways is one straight line, or a straight line
+                // to a way, along it, and a straight line on -- so on foot a ground
+                // connector ends only at a node the walking search itself can go on
+                // from: one with an edge it travels, read off the prices and
+                // directions above rather than off a list of sources. A node that
+                // lies only on water, a carry or a launch is no place to turn.
+                // The kayak's land legs end at water, and it does not read this.
+                var walkNodes = new Uint8Array(nodes);
+                for (i = 0; i < edges; i += 1) {
+                    if (isFinite(cost[i]) && allowed(graph, i, true)) { walkNodes[graph.fromNode[i]] = 1; walkNodes[graph.toNode[i]] = 1; }
+                }
+
                 // Compressed adjacency: count what meets each node, prefix-sum,
                 // then fill. An array of arrays over 116,967 nodes costs more in
                 // allocation alone than every search a reader will ever run.
@@ -219,7 +232,7 @@
                 // Filling leaves at[v + 1] at the end of node v's arcs, which is
                 // where node v + 1's begin, so afterwards node v owns
                 // arc[at[v] .. at[v + 1]).
-                routing = {length: length, cost: cost, land: land, at: at, arc: arc, snapNodes: snapNodes,
+                routing = {length: length, cost: cost, land: land, at: at, arc: arc, snapNodes: snapNodes, walkNodes: walkNodes,
                            best: new Float64Array(nodes), bestLand: new Float64Array(nodes), viaEdge: new Int32Array(nodes), viaNode: new Int32Array(nodes)};
                 return routing;
             }
@@ -683,7 +696,11 @@
             // connectors with the network between them, and *most of the way is
             // a path* is the same thing with one long connector on the end.
             // Nodes remain available everywhere. Phase 11 adds interior points
-            // within d + ENTRY_MARGIN; the same prices choose among them.
+            // within d + ENTRY_MARGIN; the same prices choose among them. On
+            // foot, since phase 13, "every node" is every node with an edge the
+            // walk travels (`walkNodes`), and an interior point is on such an
+            // edge already, since a way no walk may take is priced out of the
+            // entry set: a walk turns only where there is a way to turn onto.
             //
             // **One entry and one exit**, which is what makes this a walk to
             // the network rather than a shortcut across it: a route free to
@@ -885,6 +902,8 @@
                     if (isFinite(best[i])) { heap.push(i, best[i], bestLand[i]); }
                 }
                 for (i = 0; i < nodes && !toEnds.length; i += 1) {
+                    // On foot the walk leaves the ground only where it can walk on.
+                    if (!kayak() && !work.walkNodes[i]) { continue; }
                     if (entryBounds && entryBounds[i] > leastLand) { continue; }
                     var leaveM = far(graph.nodeLon[i], graph.nodeLat[i], to.lon, to.lat), leave = leaveM * off;
                     var leaveLand = 0;
@@ -1035,7 +1054,7 @@
                 }
                 var entries = new Heap();
                 for (i = 0; i < nodes && !fromEnds.length && !kayak(); i += 1) {
-                    if (!isFinite(best[i])) { continue; }
+                    if (!isFinite(best[i]) || !work.walkNodes[i]) { continue; }
                     var floor = far(graph.nodeLon[i], graph.nodeLat[i], from.lon, from.lat) * off + best[i];
                     if (cheaper(bestLand[i], floor, plainLand, plain)) { entries.push(i, floor, bestLand[i]); }
                 }
