@@ -1674,6 +1674,146 @@ phase 11 was built. It is planned and recorded in its own file,
 [`kayak-offset-phases.md`](kayak-offset-phases.md), as phases 12a–12h against a
 baseline frozen from main `6de243c`. Per-leg modes follow it.
 
+### Phase 13 — A walk bends only where there is a way
+
+**Uwe's decision, 2026-09-28, verbatim.** *"Ich würde A sagen. Es ist ja merkwürdig wenn ein Einstieg
+mitten im Land ohne Weg passiert. Da wundert man sich ja dann eher."* ("I would say A. An entry in the
+middle of the land with no way is odd. You would wonder about it.")
+
+What A means, as it was put to him: a walking leg away from the ways has two shapes only — one straight
+line from start to goal, or a straight line to a way, along the way, and a straight line to the goal,
+entering and leaving at a node of the way or in the middle of its edge as since phase 11. Until now a
+walk could turn at any node of the network, nodes that lie only on water among them, where it walked no
+edge at all; its answers then depended on where the paddle line runs.
+
+**Uwe's decision on the phase's stop, 2026-09-29, verbatim.** *"Ein Knick mitten in Wasser ist auch
+merkwürdig. Ich denke es ist erstmal ok wie vor dem Kajak Mode einfach eine gerade zu zeichnen auch
+übers Wasser."* ("A bend in the middle of the water is odd too. For now I think it is fine, as before
+the kayak mode, to simply draw a straight line, over water as well.") A stays as built; the walking
+price rises it causes are accepted, the largest among them. The brief's stop at +25 % or +500 still
+holds for any rise the joins or the contraction cause; there is none.
+
+**Review's decisions for this phase (not Uwe's).**
+
+1. On foot, in both Stay-on-paths settings, a ground connector attaches only to a node with at least
+   one edge the walking search travels, and a phase-11 middle entry only on such an edge; the straight
+   line stays. Defined by what the search traverses, not by a source list.
+2. The kayak is unchanged: the rule is gated on walking, and its answers are compared with main's.
+3. The phase-11 reference gets the same rule, written independently; 0 mismatches on all three maps.
+4. The node pairs lying on one point are joined, counted per map before and after; a pair meant to stay
+   apart is named with its reason; whether the same cause explains Lomsdal-Visten's 28 carries is answered.
+5. Edges of no length that are not bridges are taken out at the page grid without breaking a join; the
+   bridges of no length stay unless one is found not to be intentional.
+6. `make drive-all` drives the pages one after another by default, one whole log per page, the exit
+   status the sum; a parallel setting is optional.
+7. The graph changes are intended; the kayak routes stay main's or change with a named cause; §4.4's
+   gates, the lake planes and the stream directions hold.
+
+**Implementation choices (not Uwe's or review's).**
+
+- *The rule.* "An edge walking may travel" is an edge with a finite walking cost that `allowed()`
+  permits: what `joinedRoute`'s walking search relaxes. Bridges and ferries count; paddled edges,
+  carries and launches do not. `router()` keeps it per setting as `walkNodes`; `joinedRoute` reads it
+  on foot only, where it seeds the exits and scans the entries. The phase-11 middle entries needed no
+  change: `entrySegments` already skips an edge whose cost is infinite. The reference builds its own
+  table from the edges and skips the same nodes in its exhaustive exit and entry scans.
+- *Joins.* `graph.joined_where_they_meet` (moved from `paddle_network`, where it joined only a loose
+  carry, launch or landing end) makes one node of every two within `ZERO_BRIDGE_M` (1 µm), whatever
+  their sources: a loose end lying exactly on another line where the line's simplified noding copy
+  passes beside it is bridged at a cut with a connector of no length, which `_connectors` does not draw.
+  It runs after the second noding and again after the dam repair, which writes cut ends on grid points
+  and on Malingsbo-Kloten puts 27 pairs of water ends on one point (all 25.00–25.10 m from a dam, each
+  on one arc of its circle, so no pair is kept apart: the arc join makes the same joins).
+- *Contraction.* `graph.contracted_where_written_as_one` writes every vertex through the page's grid
+  (1e-6°) and reads it back; an edge all of whose vertices land on one point is contracted — its two
+  nodes become one and every other edge that met either still meets it. Bridges are kept (the join
+  itself), except where the contraction leaves one a loop of no length. It runs last, before the
+  checks after noding, so the strict loose-access gate and the dam gate read the final graph. The
+  switch-off branch joins and contracts too.
+- *The premise counts differed from the code, recorded here.* Main's pages are the switch-on graphs
+  since 12g: Malingsbo-Kloten has 116 pairs on one point (the 154 were counted on 12e-2's switch-off
+  graph), Lomsdal-Visten 119, Abisko 2, all but MK's dam pairs walking ways. "14 on Malingsbo-Kloten
+  and 67 on Abisko" were two partial counts (edges of no metric length after the dam repair; Abisko's
+  Shore alone): on the page grid every map has thousands — 1,037 / 3,382 / 3,024 non-bridge edges,
+  mostly walking edges of 1–10 cm between nodes further apart than the noding's 1 cm. All of them are
+  contracted.
+- *Lomsdal-Visten's 28 carries* are the same cause: phase 10's switch-off graph has 313 pairs on one
+  point, exactly 28 of them a carry end on a Shore node.
+
+**Done 2026-09-29 — a walk turns only on a way, and the graph has no two nodes on one point and no
+edge the page writes as a point.** Evidence, scripts and logs: `~/mockups/kayak-mode/walking-a/`
+(`report.md` first). Main's three pages rebuilt from `e18d11f` there have graph header and data byte
+for byte the published pages'. Every build, harness run, drive and hook run was a transient unit under
+`MemoryMax=8G` inside the shared heavy lock; times are the scripts' own.
+
+*Walking, main's page against this phase's* (phase 11's pairs: the 200 phase-10 pairs and the radius
+sample, 240 a setting, Malingsbo-Kloten 252; every stored end re-found on each page). Changed: cost
+beyond 1e-8 + 1e-12 × cost, or length by more than 1 cm. The cause is *the rule* where the same search on
+the new graph with every node a place to turn answers otherwise; otherwise *joined pairs* or *removed
+edges* where main's or the new route passes within 0.5 m of one. Costs are the walking price.
+
+| Map, setting | Changed | Rule / joined pairs / removed edges | Dearer / cheaper | Largest cost increase | Largest length increase |
+|---|---:|---|---:|---|---|
+| Abisko, walking | 26 | 26 / 0 / 0 | 26 / 0 | +56,328.6 (+73.2 %), pair 93 | +9,353.0 m, pair 16 |
+| Abisko, Stay on paths | 21 | 21 / 0 / 0 | 21 / 0 | +33,819.6 (+23.9 %), pair 93 | +2,400.1 m, pair 52 |
+| Malingsbo-Kloten, walking | 6 | 3 / 3 / 0 | 3 / 3 | +304.8 (+1.1 %), pair 49 | +179.8 m, pair 49 |
+| Malingsbo-Kloten, Stay on paths | 4 | 1 / 3 / 0 | 1 / 3 | +70.6 (+0.3 %), pair 189 | +0.9 m, pair 33 |
+| Lomsdal-Visten, walking | 6 | 5 / 1 / 0 | 5 / 1 | +4,317.9 (+48.1 %), pair 150 | +1,197.3 m, pair 34 |
+| Lomsdal-Visten, Stay on paths | 5 | 3 / 2 / 0 | 3 / 2 | +2,164.8 (+8.2 %), pair 150 | 0 m |
+
+Every change the rule makes is a main answer that pivoted at a node with no walkable edge; no new
+answer does. Every change from the joined pairs is cheaper; none comes from the removed edges. Main's
+walk turned there because both straight legs then stayed on dry grid cells; without that bend it crosses
+the water at 30 a metre or goes round on a way. Abisko pair 93 (19.049624 68.387850 → 18.879343
+68.454055) turned on the lake at 19.054924 68.402242 and now takes a Topografi 50 path from 18.911715
+68.446233; Lomsdal-Visten pair 150 (12.847041 65.721068 → 12.888884 65.707935) turned at a carry's water
+end and is now one straight line, 2,548 → 2,416 m long, dearer for the water it crosses. Uwe accepted
+these on 2026-09-29.
+
+*Kayak, main's page against this phase's.* Abisko 5 of 240 routes change (7 with Stay on paths),
+Malingsbo-Kloten 13 of 252 (16), Lomsdal-Visten 0 (1); every one cheaper, none dearer. Abisko's differ
+in the secondary price alone (−0.04 to −0.15): a contracted node group spans two neighbouring grid points
+and a piece of one grid step between them becomes a loop the route no longer walks (e.g. 0.041 m of
+Narrow water at 18.689507 68.235380). Malingsbo-Kloten's and Lomsdal-Visten's fall in land price
+(−6.3 to −103.4) where a joined pair opens a shorter carry: a carry path's end at 15.613022 60.128898 now
+meets the road it lay on (road leg 105.42 → 100.56 m); an FKB end and a Turrutebasen end on one point
+let a carry take 95.6 m of FKB.
+
+*The reference.* Phase 11's harness in all four settings on the new pages: 960 / 1,008 / 960
+comparisons, 0 mismatches, largest error 2.9 × 10⁻¹¹ / 1.5 × 10⁻¹¹ / 5.8 × 10⁻¹¹.
+
+| Against main, same machine | Abisko | Malingsbo-Kloten | Lomsdal-Visten |
+|---|---:|---:|---:|
+| Node pairs within 1 µm | 2 → 0 | 116 → 0 | 119 → 0 |
+| Non-bridge edges the page writes as a point | 1,037 → 0 | 3,382 → 0 | 3,024 → 0 |
+| of them one-way stream edges | 49 → 0 | 76 → 0 | 0 |
+| Bridges the page writes as a point (kept; left out where left a loop) | 32 → 17 | 320 → 141 | 239 → 99 |
+| Edges / nodes | 117,154 / 58,593 → 116,102 / 57,818 | 347,158 / 181,435 → 343,597 / 178,757 | 483,984 / 241,230 → 480,820 / 238,969 |
+| Page Brotli bytes (budget +50 kB) | 2,292,707 → 2,287,183 | 8,575,311 → 8,558,579 | 8,780,822 → 8,765,377 |
+| Graph build s (budget 1.2×) | 322.0 → 325.8 | 732.1 → 713.4 | 1,347.2 → 1,332.3 (the water build) |
+| Walking p95 ms, off / on | 500.05 / 336.60 → 210.05 / 108.10 | 1,467.90 / 1,104.15 → 305.15 / 208.10 | 4,155.80 / 2,337.30 → 2,341.00 / 821.40 |
+| Kayak p95 ms, off / on | 430.10 / 426.00 → 403.55 / 396.50 | 2,749.25 / 2,609.85 → 2,806.20 / 2,786.55 | 4,574.55 / 4,480.15 → 4,550.20 / 4,441.50 |
+| p95 budget max(1.5 × main, 300), walking / kayak, off | 750.08 / 645.15 | 2,201.85 / 4,123.88 | 6,233.70 / 6,861.83 |
+
+The p95s are one search per pair on the 200 phase-10 pairs after four warm-ups, Firefox 153, main's and
+this phase's page in the same lock hold. Walking gets faster because a node with no walkable edge is no
+longer seeded as an exit. On the new graphs: Shore at least 12.9568 / 12.9566 / 12.9553 m from the bank,
+none under 12 m; the dry metres, the loose ends at the crop and the dam clearance (Malingsbo-Kloten, no
+edge inside a disc, least 25.0 m) main's; stream chains 311 / 345 with main's direction (277 / 175 one
+way), MK's stream edge of no length at 14.987443 59.875024 gone; lake planes 364 / 600 / 983, main's.
+
+*Drives.* Twenty-five selected readings, the kayak and entry selection of 12g and the walking readings
+(a tap beside a path, a leg not worth routing, a way across a sound, foot and water, the dry way's words,
+the goal readings): 530 / 682 / 516 readings, twice green on each page. The first Malingsbo-Kloten run
+broke 13: the contraction renumbers three fixture edges, each the same edge vertex for vertex — the
+Kloten road 45687 → 45474, its northern launch 338743 → 335372, the long edge 68169 → 67649 — and the
+scene now names them. `command make drive-all` once, one page after another: 1,836 / 1,986 / 1,825
+readings, 0 broken, 0 figures moved, 4 skipped by each scene; the largest process 2,443 MB. No scene
+figure moved (`scene-diff.md` in the evidence lists the three renumbered ids).
+
+`drive-all` is `f3cda71`, the joins and the contraction `297ba28`, the rule with its reference and tests
+`1860135`; this record and the renumbered fixtures are the commit after them. Not pushed or published.
+
 ## 5. Not in this plan
 
 - Sea kayaking's own concerns — wind, exposure, tides — nothing here prices them.

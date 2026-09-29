@@ -1748,6 +1748,10 @@ join and turn only at nodes with a walkable edge; the edges of no length the pag
 walking node pairs on Malingsbo-Kloten that a connector of no length leaves unjoined; and
 `drive-all`'s memory.
 
+All four were taken up by phase 13 of `kayak-mode-phases.md`, "A walk bends only where there is a way"
+(2026-09-29): the walking rule A, the node pairs joined and the edges of no length contracted on all three
+maps, and `drive-all` one page after another.
+
 ## 6. Outside this step
 
 No new water source, finer shared grid, exact-width walking price, wind/fetch/exposure

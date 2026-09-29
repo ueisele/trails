@@ -971,8 +971,9 @@ SCENES: dict[str, Scene] = {
         aim_from=(59.882007, 15.060653),
         # Phase 10 keeps the Topografi 50 road from 59.883874 N, 15.740213 E.
         # Launch noding renumbers 67026 → 67986 and shortens 3.439 → 3.436 km; the line off the bank
-        # renumbers it again, 67986 → 68169, the same edge vertex for vertex (phase 12g).
-        long_edge=68169,
+        # renumbers it again, 67986 → 68169, the same edge vertex for vertex (phase 12g); phase 13's
+        # contraction of edges the page writes as a point renumbers it 68169 → 67649, the same edge.
+        long_edge=67649,
         # Phase 9: Uwe accepts 356.595 → 2,343.036 m with the shared water grid.
         # The old line crosses about 66 m of river; both walking settings now
         # take the road under the unchanged water price of 30.
@@ -8468,7 +8469,8 @@ def a_way_enters_the_middle_of_a_road(page: Any) -> Check:
     west = (59.89594919593639, 15.287872308948302)
     bay = (59.898026272880365, 15.288010426978055)
     # Edge ids on the page: the line off the bank renumbers the road 45537 → 45687 and the
-    # northern launch 284183 → 338743, each the same edge vertex for vertex (phase 12g).
+    # northern launch 284183 → 338743, each the same edge vertex for vertex (phase 12g); phase 13's
+    # contraction renumbers them 45687 → 45474 and 338743 → 335372, again the same edges.
     readings: list[Reading] = []
     for paths in (False, True):
         east_read = read_water_leg(page, (east, bay), paths=paths, raw_zoom=17, measure_shore=True)
@@ -8478,7 +8480,7 @@ def a_way_enters_the_middle_of_a_road(page: Any) -> Check:
             prefix = f"{label}, Stay on paths {'on' if paths else 'off'}"
             state, entry = got["state"], got["entry"]
             readings.extend(water_leg_readings(got, prefix))
-            readings.append(Reading(f"{prefix}: the northern launch from the road", 338743 in entry["edges"], True))
+            readings.append(Reading(f"{prefix}: the northern launch from the road", 335372 in entry["edges"], True))
             whole = state["walked"] + state["crossed"]
             words = f"{whole / 1000:.2f} km · {state['crossed'] / 1000:.2f} km 🛶 · {state['walked'] / 1000:.2f} km 🚶"
             readings.append(Reading(f"{prefix}: the panel includes every piece", words in got["planningLine"], True))
@@ -8488,7 +8490,7 @@ def a_way_enters_the_middle_of_a_road(page: Any) -> Check:
                 readings.extend(
                     [
                         Reading(f"{prefix}: the raw start stays off-network", state["points"][0].get("edge", -1), -1),
-                        Reading(f"{prefix}: the road is entered in its middle", entry["cut"]["edge"], 45687),
+                        Reading(f"{prefix}: the road is entered in its middle", entry["cut"]["edge"], 45474),
                         Reading(f"{prefix}: connector then partial road", [p["kind"] for p in parts[:2]], ["land", "routed"]),
                         Reading(
                             f"{prefix}: the connector ends at the entry", [parts[0]["lon"][-1], parts[0]["lat"][-1]], [point["lon"], point["lat"]]
@@ -8507,7 +8509,7 @@ def a_way_enters_the_middle_of_a_road(page: Any) -> Check:
                     ]
                 )
             else:
-                readings.append(Reading(f"{prefix}: the finger still snaps", state["points"][0].get("edge"), 45687))
+                readings.append(Reading(f"{prefix}: the finger still snaps", state["points"][0].get("edge"), 45474))
             readings.append(noted(f"{prefix}: on foot m", state["walked"]))
         # Phase-10 attached readings and the phase-11 virtual table measured
         # these differences; the raw-tap drive now checks the displayed pieces.
@@ -8526,7 +8528,7 @@ def a_way_enters_the_middle_of_a_road(page: Any) -> Check:
     readings.extend(
         [
             Reading("walking E8 stays off-network", walk["state"]["points"][0].get("edge", -1), -1),
-            Reading("walking E8 enters the road mid-edge", walk["entry"]["cut"]["edge"], 45687),
+            Reading("walking E8 enters the road mid-edge", walk["entry"]["cut"]["edge"], 45474),
             Reading("walking draws connector then partial road", [p["kind"] for p in walk["paddledTrack"][:2]], ["land", "routed"]),
             noted("walking E8: connector m", walk["paddledTrack"][0]["length"]),
             noted("walking E8: on foot m", walk["state"]["walked"]),

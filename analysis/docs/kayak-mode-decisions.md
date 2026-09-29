@@ -105,6 +105,8 @@ would draw it without a change.
 
 ## 5. Changes
 
+- 2026-09-29 — phase 13: Uwe's walking decision A (2026-09-28, "Ich würde A sagen") is built — on foot a walk away from the ways is one straight line or a straight line to a way, along it and on; it turns only at a node with an edge walking travels. Uwe accepted the dearer walks it causes (2026-09-29, "wie vor dem Kajak Mode einfach eine gerade zu zeichnen auch übers Wasser"), up to +73 % on Abisko's pair 93. The node pairs on one point are joined (2 / 116 / 119) and the edges the page writes as a point contracted (1,037 / 3,382 / 3,024); kayak routes change only where these open a cheaper way; 2,928 comparisons equal the reference; `drive-all` drives one page after another. The build-note is in `kayak-mode-phases.md`.
+
 - 2026-09-28 — phase 12g, Malingsbo-Kloten: the line off the bank is on for the second map. 1,008 of 1,008 comparisons equal the reference; kayak p95 2,774.30 / 2,696.25 ms (budget 3,103.50 / 3,186.30); page +567,147 B Brotli; graph build 728.2 s (limit 1,164). Four shared fixes came out of it: dam-disc rounding, the same-arc join at dams (review's decisions), and two loose-end fixes; 17 edges of no length are recorded for a later cleanup
 
 - 2026-09-28 — phase 12g, Lomsdal-Visten: switched on and built on main `6641db1`. 0 of 960 comparisons differ from the reference; kayak p95 4,675.10 / 4,308.40 ms (budget 5,669.10 / 5,586.23); 1.20× the edges and +1.0 MB of page; every carry and launch reaches the water, the 28 main never joined among them. The scene's exact bank taps keep their meaning, finger taps beside them read the line.
