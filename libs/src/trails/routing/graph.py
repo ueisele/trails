@@ -13,7 +13,9 @@ instead, where it decides which of two parallel lines a route follows without
 ever removing one.
 """
 
-from dataclasses import dataclass
+from collections import Counter
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from typing import Any
 
 import geopandas as gpd
@@ -634,6 +636,112 @@ def _connectors(
         )
 
     return gpd.GeoDataFrame(rows, columns=list(EDGE_COLUMNS), geometry=geometries, crs=edges.crs)
+
+
+def _made_one(network: Network, joined: UnionFind, dropped: np.ndarray | None = None) -> Network:
+    """Renumber the nodes by the groups ``joined`` holds, leave out the ``dropped`` edges, and read components and degrees again.
+
+    Each group keeps the position of its first node; ids stay dense, in the order of the nodes kept.
+    """
+    nodes, edges = network.nodes, network.edges
+    ends = edges[["from_node", "to_node"]].to_numpy(dtype=int)
+    if dropped is not None and dropped.any():
+        edges, ends = edges[~dropped], ends[~dropped]
+    root = np.array([joined.find(node) for node in range(len(nodes))], dtype=np.int64)
+    used = np.unique(root[ends.ravel()])
+    dense = np.full(len(nodes), -1, dtype=np.int64)
+    dense[used] = np.arange(len(used))
+    renumbered = dense[root[ends]]
+    if (renumbered < 0).any():
+        raise ValueError("a merged node lost its number")
+    edges = edges.copy()
+    edges["from_node"] = renumbered[:, 0]
+    edges["to_node"] = renumbered[:, 1]
+    edges = edges.reset_index(drop=True)
+    edges["component"] = label_components(edges)
+    kept = nodes.iloc[used].drop(columns=["degree", "component"], errors="ignore").reset_index(drop=True)
+    return replace(network, edges=edges, nodes=_describe_nodes(kept, edges))
+
+
+def joined_where_they_meet(network: Network, within_m: float) -> tuple[Network, dict[str, int]]:
+    """Make one node of every two that lie on one point, which a bridge of no length should have joined.
+
+    A loose end lying on another line exactly -- where that line's simplified copy, which the noding
+    reads, passes beside it -- is bridged by cutting the line where the end lies and drawing a
+    connector to the cut; the connector has no length, and :func:`_connectors` draws none, so the cut
+    and the end stay two nodes on one point and nothing can pass between them: a path ending on a
+    road, a carry on a path (154 such pairs in Malingsbo-Kloten's graph of phase 10, 116 with the line
+    off the bank). Noding otherwise keeps nodes at least its tolerance apart, so only these pairs lie
+    within ``within_m`` of each other. Every such pair is made one node, whatever its sources: two
+    lines on one point are joined there as noding joins them anywhere else. Ids are renumbered densely
+    and degrees and components read again.
+
+    Returns:
+        The network, the same object where nothing lies that close, and how many pairs were found
+        and how many nodes merged away
+    """
+    nodes = network.nodes
+    points = np.asarray(nodes.geometry.to_numpy(), dtype=object)
+    near, found = shapely.STRtree(points).query(points, predicate="dwithin", distance=within_m)
+    pairs = [(int(a), int(b)) for a, b in zip(near.tolist(), found.tolist(), strict=True) if int(a) < int(b)]
+    if not pairs:
+        return network, {"pairs on one point": 0, "nodes merged": 0}
+    joined = UnionFind(len(nodes))
+    for a, b in pairs:
+        joined.union(a, b)
+    merged = _made_one(network, joined)
+    return merged, {"pairs on one point": len(pairs), "nodes merged": int(len(nodes) - len(merged.nodes))}
+
+
+def contracted_where_written_as_one(
+    network: Network, written: Callable[[np.ndarray], np.ndarray], *, keep: frozenset[str] = frozenset({BRIDGE})
+) -> tuple[Network, dict[str, Any]]:
+    """Take out every edge the page writes as a single point, making its two ends one node.
+
+    The page writes a coordinate on a grid (1e-6 degree, 0.11 m of latitude), and an edge shorter than
+    a cell can land wholly on one grid point: on the page it has no length and, for a one-way stream,
+    no direction. Such an edge is contracted -- its two nodes become one and every other edge that met
+    either keeps meeting it -- so no join is lost and nothing the page could measure changes. Sources
+    in ``keep`` stay as edges (the bridges of no length, which are the join itself); an edge left
+    beginning and ending at one node and still written as a point carries nothing and is left out,
+    whatever its source.
+
+    Args:
+        network: The graph, metric
+        written: Where the page writes each vertex, read back into the network's CRS (rows of x, y)
+        keep: Sources that are never contracted
+
+    Returns:
+        The network, the same object where nothing collapses, and the figures: edges contracted
+        by source, one-way edges among them, loops left out, nodes merged
+    """
+    edges, nodes = network.edges, network.nodes
+    geometries = edges.geometry.to_numpy()
+    counts = shapely.get_num_coordinates(geometries)
+    read = written(shapely.get_coordinates(geometries))
+    starts = np.concatenate([[0], np.cumsum(counts)[:-1]]).astype(np.int64)
+    spread = np.maximum.reduceat(read, starts, axis=0) - np.minimum.reduceat(read, starts, axis=0)
+    point = (spread == 0).all(axis=1)
+    sources = edges["source"].to_numpy()
+    contract = point & ~np.isin(sources, list(keep))
+    figures: dict[str, Any] = {"contracted": {}, "one way contracted": 0, "loops left out": {}, "nodes merged": 0}
+    if not point.any():
+        return network, figures
+    ends = edges[["from_node", "to_node"]].to_numpy(dtype=int)
+    joined = UnionFind(len(nodes))
+    for a, b in ends[contract].tolist():
+        joined.union(a, b)
+    root = np.array([joined.find(node) for node in range(len(nodes))], dtype=np.int64)
+    loops = point & ~contract & (root[ends[:, 0]] == root[ends[:, 1]])
+    dropped = contract | loops
+    if not dropped.any():
+        return network, figures
+    figures["contracted"] = dict(Counter(sources[contract].tolist()))
+    figures["one way contracted"] = int(edges["one_way"].to_numpy(dtype=bool)[contract].sum())
+    figures["loops left out"] = dict(Counter(sources[loops].tolist()))
+    merged = _made_one(network, joined, dropped)
+    figures["nodes merged"] = int(len(nodes) - len(merged.nodes))
+    return merged, figures
 
 
 def label_components(edges: gpd.GeoDataFrame, *, length_column: str = "length_m") -> pd.Series:

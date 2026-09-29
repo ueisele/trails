@@ -18,7 +18,7 @@ from trails.network import graphs
 from trails.network.launches import LAUNCHES, launches
 from trails.routing.coverage import CHAIN_COVERAGE_COLUMNS, chain_coverage
 from trails.routing.elevation import PROFILE_COLUMNS, chain_profiles
-from trails.routing.graph import DEFAULT_BRIDGE_COST_FACTOR, Network, build_network
+from trails.routing.graph import DEFAULT_BRIDGE_COST_FACTOR, Network, build_network, contracted_where_written_as_one, joined_where_they_meet
 from trails.routing.noding import lines_of, working_lines
 from trails.routing.sources import BRIDGE, PADDLE, PATH, PORTAGE, NetworkSource
 
@@ -642,16 +642,27 @@ def build(
         network = node(sources, bridge_m=ZERO_BRIDGE_M)
         print(f"  Combined graph build with the line off the bank: {time.perf_counter() - started:.3f} s; {len(network.edges):,} edges")
         # A bridge of no length is drawn as none: the end and the cut it reached are made one node here.
-        network, assembled.evidence["joined where they meet"] = paddle_network.joined_where_they_meet(network, ZERO_BRIDGE_M)
-        print(f"  Line off the bank, nodes on one point made one: {assembled.evidence['joined where they meet']}")
+        network, assembled.evidence["joined where they meet"] = joined_where_they_meet(network, ZERO_BRIDGE_M)
+        print(f"  Nodes on one point made one: {assembled.evidence['joined where they meet']}")
         # The page's grid would round a cut end into its dam's disc; the switch-off graph keeps phase 9's ends.
         network, assembled.evidence["written off the discs"] = paddle_network.written_off_the_discs(network, assembled.dams)
         print(f"  Line off the bank, ends written off the dam discs: {assembled.evidence['written off the discs']}")
         # A disc can cut a narrow where its middle meets the contour; the pieces on one side of the dam are joined again.
         network, assembled.evidence["joined along the discs"] = paddle_network.joined_along_the_discs(network, assembled.dams, assembled.water)
         print(f"  Line off the bank, joined along the dam discs: {assembled.evidence['joined along the discs']}")
+        # The disc repair writes cut ends on grid points, and two ends of different lines can land on one.
+        network, assembled.evidence["joined where they meet after the discs"] = joined_where_they_meet(network, ZERO_BRIDGE_M)
+        print(f"  Nodes on one point made one after the disc repair: {assembled.evidence['joined where they meet after the discs']}")
+        # Last, as the disc repair writes ends on the page grid: what the page writes as one point is one node.
+        network, assembled.evidence["contracted on the page grid"] = contracted_where_written_as_one(network, _page_writes(network.edges.crs))
+        print(f"  Edges the page writes as a point, contracted: {assembled.evidence['contracted on the page grid']}")
         assembled.evidence["validation"] = paddle_network.validate(network, assembled)
         print(f"  Line off the bank after noding: {assembled.evidence['validation']}")
+    else:
+        network, joined = joined_where_they_meet(network, ZERO_BRIDGE_M)
+        print(f"  Nodes on one point made one: {joined}")
+        network, contracted = contracted_where_written_as_one(network, _page_writes(network.edges.crs))
+        print(f"  Edges the page writes as a point, contracted: {contracted}")
     report(network)
     network = replace(network, edges=graphs.derive(network.edges, masks, protected, rules))
     covered = chain_coverage(network.chains, network.edges)
@@ -700,6 +711,15 @@ def build(
             }
         )
     return network, pd.concat([counts, pd.DataFrame(rows)], ignore_index=True)
+
+
+def _page_writes(crs: Any) -> Callable[[np.ndarray], np.ndarray]:
+    """Where the page writes metric vertices, on its degree grid, read back into ``crs``."""
+    # Imported here: paddle_geometry imports this module.
+    from trails.network import paddle_geometry as pg
+
+    to_page, from_page = pg._page_round_trip(crs)
+    return lambda xy: pg.decoded(xy, to_page, from_page)
 
 
 def report(network: Network) -> None:

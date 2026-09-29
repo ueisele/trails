@@ -10,7 +10,7 @@ import shapely
 from shapely.geometry import LineString, Point, box
 from trails.network import graphs, paddle_geometry, paddle_network, water
 from trails.routing.elevation import with_elevation
-from trails.routing.graph import Network, build_network
+from trails.routing.graph import Network, build_network, joined_where_they_meet
 from trails.routing.sources import BRIDGE, LANDING, OPEN, PADDLE, PATH, PORTAGE, STREAM, TRAVEL, NetworkSource
 
 CRS = "EPSG:3006"
@@ -92,6 +92,20 @@ def test_every_new_source_carries_its_price_role_and_lake_owner(built):
     costs = graphs.edge_costs(built["on_sources"], graphs.Params(cache_dir="/nonexistent"))
     assert {name: costs[name]["role"] for name in expected} == {name: role for name, (_, role) in expected.items()}
     assert all("role" not in cost for cost in graphs.edge_costs(built["off_sources"], graphs.Params(cache_dir="/nonexistent")).values())
+
+
+def test_the_built_graph_has_no_two_nodes_on_one_point_and_no_edge_the_page_writes_as_a_point(built):
+    # Phase 13: noding leaves nodes on one point where a bridge had no length, and edges shorter than
+    # the page's grid; the build makes the first one node and contracts the second, in both settings.
+    for setting in ("off", "on"):
+        network = built[setting]
+        points = network.nodes.geometry.to_numpy()
+        near, found = shapely.STRtree(points).query(points, predicate="dwithin", distance=water.ZERO_BRIDGE_M)
+        assert (near == found).all(), setting
+        to_page, from_page = paddle_geometry._page_round_trip(network.edges.crs)
+        for line, source in zip(network.edges.geometry, network.edges["source"], strict=True):
+            written = paddle_geometry.decoded(shapely.get_coordinates(line), to_page, from_page)
+            assert source == BRIDGE or (written != written[0]).any(), (setting, source)
 
 
 def test_carries_and_launches_are_the_bank_build_s_and_the_line_is_offshore(built):
@@ -530,20 +544,20 @@ def test_an_end_lying_on_a_line_s_middle_is_one_node_with_the_cut_it_reached():
     network = build_network([path, carry], metric_crs=CRS, bridge_m=water.ZERO_BRIDGE_M)
     carried = network.edges[network.edges["source"] == "Portage paths"]
     assert (network.nodes["degree"] == 1).sum() == 4
-    joined, figures = paddle_network.joined_where_they_meet(network, water.ZERO_BRIDGE_M)
-    assert figures == {"nodes merged": 1}
+    joined, figures = joined_where_they_meet(network, water.ZERO_BRIDGE_M)
+    assert figures == {"pairs on one point": 1, "nodes merged": 1}
     assert sorted(joined.nodes["degree"].tolist()) == [1, 1, 1, 3]
     end = joined.edges[joined.edges["source"] == "Portage paths"]
     walked = joined.edges[joined.edges["source"] == PATH]
     assert set(end[["from_node", "to_node"]].to_numpy().ravel()) & set(walked[["from_node", "to_node"]].to_numpy().ravel())
     assert joined.edges["component"].nunique() == 1 and len(carried) == 1
     # Nodes apart by more than the reach are left as they are, the same object.
-    again, figures = paddle_network.joined_where_they_meet(joined, water.ZERO_BRIDGE_M)
-    assert again is joined and figures == {"nodes merged": 0}
+    again, figures = joined_where_they_meet(joined, water.ZERO_BRIDGE_M)
+    assert again is joined and figures == {"pairs on one point": 0, "nodes merged": 0}
 
 
-def test_ways_that_meet_on_one_point_are_left_as_main_has_them():
-    # Two walking ends on one point, with no carry, launch or landing among them: not this line's to join.
+def test_ways_that_meet_on_one_point_are_one_node_so_walking_can_pass():
+    # Two walking ends on one point, with no carry, launch or landing among them: phase 13 joins them too.
     nodes = gpd.GeoDataFrame(
         {"degree": [1, 1, 1, 1], "component": [0, 0, 1, 1]}, geometry=[Point(0, 0), Point(10, 0), Point(10, 0), Point(20, 0)], crs=CRS
     )
@@ -563,5 +577,7 @@ def test_ways_that_meet_on_one_point_are_left_as_main_has_them():
         crs=CRS,
     )
     network = Network(chains=gpd.GeoDataFrame(geometry=[], crs=CRS), edges=edges, nodes=nodes)
-    same, figures = paddle_network.joined_where_they_meet(network, water.ZERO_BRIDGE_M)
-    assert same is network and figures == {"nodes merged": 0}
+    joined, figures = joined_where_they_meet(network, water.ZERO_BRIDGE_M)
+    assert figures == {"pairs on one point": 1, "nodes merged": 1}
+    assert joined.edges[["from_node", "to_node"]].to_numpy().tolist() == [[0, 1], [1, 2]]
+    assert joined.nodes["degree"].tolist() == [1, 2, 1] and joined.edges["component"].nunique() == 1

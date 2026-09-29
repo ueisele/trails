@@ -1,9 +1,10 @@
 """Tests for the merged routing graph."""
 
 import geopandas as gpd
+import numpy as np
 import pytest
-from shapely.geometry import LineString, box
-from trails.routing.graph import EDGE_COLUMNS, build_network, label_components
+from shapely.geometry import LineString, Point, box
+from trails.routing.graph import EDGE_COLUMNS, Network, build_network, contracted_where_written_as_one, joined_where_they_meet, label_components
 from trails.routing.sources import BRIDGE, FERRY, PATH, PORTAGE, NetworkSource
 
 CRS = "EPSG:25833"
@@ -388,3 +389,84 @@ def test_inferred_sources_connect_without_becoming_selectable_chains(kind):
     assert set(network.chains["source"]) == {"path"}
     assert network.edges["component"].nunique() == 1
     assert network.edges.loc[network.edges["source"] == "path", "chain_id"].notna().all()
+
+
+def _network(lines: list[list[tuple[float, float]]], ends: list[tuple[int, int]], sources: list[str], one_way: list[bool] | None = None) -> Network:
+    """A small graph written by hand: its edges, their end nodes and their sources, in metres."""
+    count = 1 + max(max(pair) for pair in ends)
+    positions: dict[int, tuple[float, float]] = {}
+    for line, (a, b) in zip(lines, ends, strict=True):
+        positions.setdefault(a, line[0])
+        positions.setdefault(b, line[-1])
+    edges = gpd.GeoDataFrame(
+        {
+            "from_node": [a for a, _ in ends],
+            "to_node": [b for _, b in ends],
+            "cost": [LineString(line).length for line in lines],
+            "source": sources,
+            "kind": [BRIDGE if source == BRIDGE else "paddle" if source == "Streams" else PATH for source in sources],
+            "chain_id": [None if source == BRIDGE else f"{source}-{i}" for i, source in enumerate(sources)],
+            "length_m": [LineString(line).length for line in lines],
+            "one_way": one_way or [False] * len(lines),
+        },
+        geometry=[LineString(line) for line in lines],
+        crs="EPSG:3006",
+    )
+    edges["component"] = label_components(edges)
+    nodes = gpd.GeoDataFrame({"degree": [0] * count, "component": [0] * count}, geometry=[Point(positions[n]) for n in range(count)], crs="EPSG:3006")
+    return Network(chains=gpd.GeoDataFrame(geometry=[], crs="EPSG:3006"), edges=edges, nodes=nodes)
+
+
+def _grid(xy: np.ndarray) -> np.ndarray:
+    """A page grid of 0.1 m, as the tests' stand-in for the page's degree grid."""
+    return np.rint(xy / 0.1) * 0.1
+
+
+def test_nodes_on_one_point_are_joined_and_nodes_apart_are_not():
+    # A road cut at (10, 0), a path ending exactly there on a node of its own, and a track 1 cm beside it.
+    network = _network(
+        [[(0, 0), (10, 0)], [(10, 0), (20, 0)], [(10, 0), (10, 10)], [(10.01, 0), (10.01, -10)]], [(0, 1), (1, 2), (3, 4), (5, 6)], [PATH] * 4
+    )
+    joined, figures = joined_where_they_meet(network, 1e-6)
+    assert figures == {"pairs on one point": 1, "nodes merged": 1}
+    ends = joined.edges[["from_node", "to_node"]].to_numpy().tolist()
+    assert ends[2][0] == ends[0][1] == ends[1][0] and ends[3][0] not in (ends[0][1],)
+    assert joined.nodes["degree"].tolist() == [1, 3, 1, 1, 1, 1] and joined.edges["component"].nunique() == 2
+    again, figures = joined_where_they_meet(joined, 1e-6)
+    assert again is joined and figures["nodes merged"] == 0
+
+
+def test_an_edge_the_page_writes_as_a_point_is_contracted_and_every_join_kept():
+    # Node 1 and node 2 are 3 cm apart, joined by an edge the 0.1 m grid writes as one point; a road
+    # leaves each, and a one-way stream piece of 2 cm between 2 and 3 collapses as well.
+    network = _network(
+        [[(0, 0), (10, 0)], [(10, 0), (10.03, 0)], [(10.03, 0), (20, 0)], [(10.03, 0), (10.03, 0.02)], [(10.03, 0.02), (10.03, 30)]],
+        [(0, 1), (1, 2), (2, 4), (2, 3), (3, 5)],
+        [PATH, PATH, "Leder", "Streams", "Streams"],
+        [False, False, False, True, True],
+    )
+    contracted, figures = contracted_where_written_as_one(network, _grid)
+    assert figures["contracted"] == {PATH: 1, "Streams": 1} and figures["one way contracted"] == 1 and figures["nodes merged"] == 2
+    edges = contracted.edges
+    assert len(edges) == 3 and edges["source"].tolist() == [PATH, "Leder", "Streams"]
+    # The three ways that met the two collapsed edges meet at one node now.
+    middle = edges[["from_node", "to_node"]].to_numpy()
+    assert middle[0][1] == middle[1][0] == middle[2][0]
+    assert contracted.nodes["degree"].tolist() == [1, 3, 1, 1] and edges["component"].nunique() == 1
+    assert edges["one_way"].tolist() == [False, False, True]
+
+
+def test_a_bridge_the_page_writes_as_a_point_stays_unless_it_is_left_a_loop():
+    # A bridge of 2 cm between two ways is the join itself: it stays. One in parallel with a collapsed
+    # road piece would begin and end at one node once the road piece is contracted: it goes.
+    network = _network(
+        [[(0, 0), (10, 0)], [(10, 0), (10.02, 0)], [(10.02, 0), (20, 0)], [(20, 0), (20.03, 0)], [(20, 0), (20.03, 0)], [(20.03, 0), (30, 0)]],
+        [(0, 1), (1, 2), (2, 3), (3, 4), (3, 4), (4, 5)],
+        [PATH, BRIDGE, PATH, PATH, BRIDGE, PATH],
+    )
+    contracted, figures = contracted_where_written_as_one(network, _grid)
+    assert figures["contracted"] == {PATH: 1} and figures["loops left out"] == {BRIDGE: 1}
+    assert contracted.edges["source"].tolist() == [PATH, BRIDGE, PATH, PATH] and contracted.edges["component"].nunique() == 1
+    nothing = _network([[(0, 0), (10, 0)]], [(0, 1)], [PATH])
+    same, figures = contracted_where_written_as_one(nothing, _grid)
+    assert same is nothing and figures["contracted"] == {}
