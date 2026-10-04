@@ -1,5 +1,14 @@
 # AI Assistant Context for Trails Project
 
+**This repository is frozen (2026-10-02). Do not build features, fixes or new maps here.** Its
+last state of code is `0cd00f7`; every later commit is a note like this one. The work goes on in
+the `atlas` repository, which replaces `trails` and uses nothing from it at run time — it carries
+a fork of `libs/` taken at `0cd00f7`. If you are asked for something "on the map", it is `atlas`
+work. What may still happen here: republishing the three built maps unchanged, and reading —
+this checkout is the reference for how the predecessor behaved. The build outputs under
+`analysis/output/` were deleted on 2026-10-02; the published pages and their tile packs are in
+the bucket, so a republish needs a rebuild first.
+
 This project analyzes hiking trail data using Jupyter notebooks with modular Python code. Focus on clean, reusable code and self-contained notebooks.
 
 ## Tech Stack

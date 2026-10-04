@@ -2,6 +2,12 @@
 
 A Python project for analyzing hiking trail data using Jupyter notebooks, built with modern tools and best practices.
 
+> **Frozen since 2026-10-02.** This repository is no longer developed: its last state is the
+> commit before this note, `0cd00f7`. The work continues in its successor, `atlas`, which builds
+> for whole countries what this builds for one map at a time. The three maps built here —
+> Lomsdal-Visten, Abisko and Malingsbo-Kloten — stay published as they are until the successor
+> replaces them.
+
 ## Project Structure
 
 ```
